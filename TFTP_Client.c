@@ -14,18 +14,28 @@
 #include <netdb.h>
 
 //	***************************************************************************
+#define TFTP_BUF_SIZE	(512+2+2)
+#define TFTP_DATA	3
+#define TFTP_ACK	4
+#define TFTP_OP_ERROR	5
+
 #define SERVERPORT "69" // the port users will be connecting to
 int GetFile;
 int FileHandle;
-char DataBuf[512+2+2];
+char DataBuf[TFTP_BUF_SIZE];
+int BlockNumber;
 int SocketFd;
 
 //	***************************************************************************
 int main(int argc, char *argv[])
 {
+  struct sockaddr_storage their_addr;
+  socklen_t addr_len;
+  struct timeval timeout;
+  fd_set ReadFD;
   struct addrinfo hints, *servinfo, *p;
   int rv;
-  int numbytes, length;
+  int length, opcode;
 
   // -----------------------------
   if (argc != 4 ) {
@@ -94,11 +104,46 @@ int main(int argc, char *argv[])
     perror("talker: sendto");
     exit(1);
   }
-  
+
   while ( 1 ) {
-    
-    select (SocketFd+1, readfds, NULL, NULL , NULL )
-    
+    FD_ZERO(&ReadFD);
+
+    timeout.tv_sec = 5;
+    timeout.tv_usec = 0;
+    FD_SET(SocketFd, &ReadFD);
+
+    rv = select (SocketFd+1, &ReadFD, NULL, NULL , &timeout );
+    if ( rv < 0 ) {
+      printf("select() = %d\n", rv);
+      return -1;
+    }
+    if ( FD_ISSET(SocketFd, &ReadFD) ) {
+      printf("packet ready\n");
+      length = recvfrom(SocketFd, DataBuf, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
+      opcode = DataBuf[1];
+      printf("Bytes: %d, %d\n", length, opcode);
+      if ( opcode == TFTP_OP_ERROR ) {
+	printf("Error\n");
+      } else {
+	if ( GetFile ) {
+	  // sever sends file, we write to disk.
+	  if ( opcode != TFTP_DATA ) {
+	    printf("Bad opcode\n");
+	    return -1;
+	  }
+	  printf("Write to disk\n");
+	    
+	    
+	} else {
+	  // we send file, server writes to disk.
+	  if ( opcode != TFTP_ACK ) {
+	    printf("Bad opcode\n");
+	    return -1;
+	  }
+	  printf("Read from disk\n");
+	}
+      }
+    }    
   }
 
   freeaddrinfo(servinfo);

@@ -331,7 +331,7 @@ int main( int argc, char *argv[] )
         }
         printf("Rec Packet (%d) %s\n", bytes, inet_ntop(their_addr.ss_family,get_in_addr((struct sockaddr *)&their_addr),s, sizeof( s)));
         opcode = packet_buff[1];
-	
+
         switch ( opcode ) {
 
         case 1:	// read request
