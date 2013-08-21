@@ -134,14 +134,6 @@ struct TFTP_Con *TFTP_FindConnection(struct sockaddr_storage *address) {
 }
 
 // *******************************************************************************************
-/*
-void TFTP_SendData(struct TFTP_Con *ptr)
-{
-  ptr->data_length = read( ptr->fp , ptr->buf, 512) + 4;
-  sendto(ListenSocket, ptr->buf, ptr->data_length, 0, ptr->address.ai_addr, ptr->address.ai_addrlen);
-}
-*/
-// *******************************************************************************************
 void TFTP_SendAck(int block_number, struct sockaddr_storage *address)
 {
   char buf[4];
@@ -182,6 +174,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
 // *******************************************************************************************
 int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
 {
+  mode_t mode;
   struct TFTP_Con *ptr;
   char filename[256];
   int fp;
@@ -189,7 +182,8 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
   strcpy(filename, data+2);
   printf("New Write Rq: %s\n", filename);
 
-  fp = open(filename, O_WRONLY );
+  mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
+  fp = open(filename, O_WRONLY | O_CREAT, mode );
   if ( fp >= 0 ) {
     ptr = TFTP_CreateNewConnection(address);
     if ( ptr == NULL ) {
@@ -219,7 +213,8 @@ void TFTP_ProcessPacket(int opcode, char *data, int length, struct sockaddr_stor
     return ;
 
   block_number = (data[0] * 256) | data[1];
-  if ( block_number != ptr->block_number ) {
+  printf("Block, %d\n", block_number);
+  if ( block_number == ptr->block_number ) {
     printf("Error, brown trousers time\n");
 
   } else {
@@ -318,7 +313,7 @@ int main( int argc, char *argv[] )
 
     if ( select(ListenSocket+1, &ReadFD, NULL, NULL, &timeout) > 0 ) {
       printf("listener: waiting to recvfrom...\n");
-      while ( FD_ISSET(ListenSocket, &ReadFD) ) {
+      if ( FD_ISSET(ListenSocket, &ReadFD) ) {
         // read out packet.
         addr_len = sizeof(struct sockaddr);
         bytes = recvfrom(ListenSocket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
@@ -329,6 +324,7 @@ int main( int argc, char *argv[] )
         if ( bytes == 0 ) {
           continue;
         }
+	printf("==================================\n");
         printf("Rec Packet (%d) %s\n", bytes, inet_ntop(their_addr.ss_family,get_in_addr((struct sockaddr *)&their_addr),s, sizeof( s)));
         opcode = packet_buff[1];
 
@@ -353,7 +349,7 @@ int main( int argc, char *argv[] )
         }
       }
     }
-    Connection_RunTimers();
+//    Connection_RunTimers();
   }
   return 0;
 }
