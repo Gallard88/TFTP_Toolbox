@@ -31,7 +31,7 @@ int readLength;
 int Client_BlockNum;
 int SocketFd;
 int Busy;
-
+struct servent *Servent;
 //	***************************************************************************
 /*
 struct TFTP_Con
@@ -95,6 +95,7 @@ void TFTP_AckPacket(int block, struct sockaddr_storage *address)
 //	***************************************************************************
 int main(int argc, char *argv[])
 {
+	struct sockaddr_in s_in;
   struct sockaddr_storage their_addr;
   socklen_t addr_len;
   struct timeval timeout;
@@ -103,6 +104,7 @@ int main(int argc, char *argv[])
   int rv;
   int length, opcode;
   int packet_blocknum;
+	int port;
 
 // -----------------------------
   if (argc != 4 ) {
@@ -111,6 +113,13 @@ int main(int argc, char *argv[])
   }
 
 // -----------------------------
+  Servent = getservbyname("tftp","udp");
+	if (Servent == NULL ) {
+		perror("getservbyname()");
+		exit(0);
+	}
+	port = Servent->s_port;
+
 // -----------------------------
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC;
@@ -134,6 +143,15 @@ int main(int argc, char *argv[])
     fprintf(stderr, "talker: failed to bind socket\n");
     exit (-2);
   }
+
+  bzero((char *)&s_in, sizeof(s_in));
+	s_in.sin_family = AF_UNSPEC;
+
+	if (bind(SocketFd, (struct sockaddr *)&s_in, sizeof(s_in)) < 0 ) {
+		perror("bind:");
+		exit(-1);
+	}
+
 
 // -----------------------------
 // Set up initial packet.

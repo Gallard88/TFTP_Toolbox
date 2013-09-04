@@ -125,7 +125,7 @@ struct TFTP_Con *TFTP_FindConnection(struct sockaddr_storage *address) {
     if ( ptr == NULL )
       continue;
     if ( memcmp(&ptr->address, address, sizeof(struct sockaddr_storage)) == 0 ) {
-      printf("Match Addr\n");
+//      printf("Match Addr\n");
       return ptr;
     }
   }
@@ -143,7 +143,6 @@ void TFTP_SendAck(int block_number, struct sockaddr_storage *address)
   buf[2] = (block_number / 256);
   buf[3] = (block_number % 256);
   sendto(ListenSocket, buf, 4, 0, (const struct sockaddr *) address, sizeof(struct sockaddr));
-  printf("Ack: %d\n", block_number);
 }
 
 // *******************************************************************************************
@@ -153,20 +152,20 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
   char filename[256];
   int fp;
 
-  strcpy(filename, data);
+  strcpy(filename, data+2);
   printf("New Read Rq: %s\n", filename);
 
   fp = open(filename, O_RDONLY );
   if ( fp >= 0 ) {
     ptr = TFTP_CreateNewConnection(address);
     if ( ptr == NULL ) {
-      printf("TFTP_NewReadRequest() Malloc\n");
       close(fp);
       return -1;
-    }
-    ptr->block_number = 1;
-    ptr->fp = fp;
-    return 0;
+    } else {
+			ptr->block_number = 1;
+			ptr->fp = fp;
+			return 0;
+		}
   }
   return -1;
 }
@@ -187,17 +186,15 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
   if ( fp >= 0 ) {
     ptr = TFTP_CreateNewConnection(address);
     if ( ptr == NULL ) {
-      printf("TFTP_NewWriteRequest() Malloc\n");
       close(fp);
       return -1;
-    }
-    ptr->block_number = 0;
-    ptr->fp = fp;
-    ptr->write = 1;	// singal that this connection is a WRQ type.
-    TFTP_SendAck(ptr->block_number,  address);
-    return 0;
-  } else {
-    printf("File failed to open\n");
+    } else {
+			ptr->block_number = 0;
+			ptr->fp = fp;
+			ptr->write = 1;	// singal that this connection is a WRQ type.
+			TFTP_SendAck(ptr->block_number,  address);
+			return 0;
+		}
   }
   return -1;
 }
@@ -213,18 +210,17 @@ void TFTP_ProcessPacket(int opcode, char *data, int length, struct sockaddr_stor
     return ;
 
   block_number = (data[0] * 256) | data[1];
-  printf("Block, %d\n", block_number);
   if ( block_number == ptr->block_number ) {
     printf("Error, brown trousers time\n");
 
   } else {
     if ( ptr->write ) {
       rv = write( ptr->fp, data+2, length -2);
-      printf("Block %d written: %d\n", block_number, rv);
       ptr->block_number++;
 
-      if ( length < (512+2) ) {
+      if (( length < (512+2)) || ( rv < 0 )) {
         // sub size packet, enf of file.
+        printf("File transfer complete\n");
         close(ptr->fp);
         ptr->fp = -1;
       }
@@ -245,7 +241,7 @@ int main( int argc, char *argv[] )
   struct sockaddr_storage their_addr;
   socklen_t addr_len;
   fd_set ReadFD;
-  char packet_buff[TFTP_BUF_SIZE], s[256];
+  char packet_buff[TFTP_BUF_SIZE];
   int bytes, rv;
   int opcode;
 
@@ -301,8 +297,6 @@ int main( int argc, char *argv[] )
   // set up signal handlers.
 
   // ------------------------------------
-  printf("Starting main program\n");
-
   // Main Loop.
   while ( 1 ) {
     FD_ZERO(&ReadFD);
@@ -312,7 +306,6 @@ int main( int argc, char *argv[] )
     FD_SET(ListenSocket, &ReadFD);
 
     if ( select(ListenSocket+1, &ReadFD, NULL, NULL, &timeout) > 0 ) {
-      printf("listener: waiting to recvfrom...\n");
       if ( FD_ISSET(ListenSocket, &ReadFD) ) {
         // read out packet.
         addr_len = sizeof(struct sockaddr);
@@ -324,32 +317,25 @@ int main( int argc, char *argv[] )
         if ( bytes == 0 ) {
           continue;
         }
-	printf("==================================\n");
-        printf("Rec Packet (%d) %s\n", bytes, inet_ntop(their_addr.ss_family,get_in_addr((struct sockaddr *)&their_addr),s, sizeof( s)));
         opcode = packet_buff[1];
-
         switch ( opcode ) {
 
         case 1:	// read request
-          printf("New Read\n");
           TFTP_NewReadRequest(packet_buff, &their_addr);
           break;
 
         case 2:	// write request
-          printf("New Write\n");
           TFTP_NewWriteRequest(packet_buff, &their_addr);
           break;
 
         case 3:	// Data
         case 4:	// Ack
         default:	// error
-          printf("New Other\n");
           TFTP_ProcessPacket(opcode, packet_buff+2, bytes-2, &their_addr);
           break;
         }
       }
     }
-//    Connection_RunTimers();
   }
   return 0;
 }
