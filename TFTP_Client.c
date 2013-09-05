@@ -95,7 +95,7 @@ void TFTP_AckPacket(int block, struct sockaddr_storage *address)
 //	***************************************************************************
 int main(int argc, char *argv[])
 {
-	struct sockaddr_in s_in;
+  struct sockaddr_in s_in;
   struct sockaddr_storage their_addr;
   socklen_t addr_len;
   struct timeval timeout;
@@ -104,7 +104,7 @@ int main(int argc, char *argv[])
   int rv;
   int length, opcode;
   int packet_blocknum;
-	int port;
+  int port;
 
 // -----------------------------
   if (argc != 4 ) {
@@ -114,11 +114,11 @@ int main(int argc, char *argv[])
 
 // -----------------------------
   Servent = getservbyname("tftp","udp");
-	if (Servent == NULL ) {
-		perror("getservbyname()");
-		exit(0);
-	}
-	port = Servent->s_port;
+  if (Servent == NULL ) {
+    perror("getservbyname()");
+    exit(0);
+  }
+  port = Servent->s_port;
 
 // -----------------------------
   memset(&hints, 0, sizeof hints);
@@ -145,12 +145,12 @@ int main(int argc, char *argv[])
   }
 
   bzero((char *)&s_in, sizeof(s_in));
-	s_in.sin_family = AF_UNSPEC;
+  s_in.sin_family = AF_UNSPEC;
 
-	if (bind(SocketFd, (struct sockaddr *)&s_in, sizeof(s_in)) < 0 ) {
-		perror("bind:");
-		exit(-1);
-	}
+  if (bind(SocketFd, (struct sockaddr *)&s_in, sizeof(s_in)) < 0 ) {
+    perror("bind:");
+    exit(-1);
+  }
 
 
 // -----------------------------
@@ -258,9 +258,9 @@ int main(int argc, char *argv[])
             readBuf[3] = packet_blocknum % 256;
           }
           rv = sendto(SocketFd, readBuf, readLength + TFTP_HEADER_SIZE, 0, p->ai_addr, p->ai_addrlen);
-	  if ( rv < 0 ) {
-	    perror("Send Packet");
-	  }
+          if ( rv < 0 ) {
+            perror("Send Packet");
+          }
         }
       }
     }

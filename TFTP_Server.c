@@ -3,6 +3,7 @@
 // *******************************************************************************************
 
 #include <stdio.h>
+#include <syslog.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
@@ -153,6 +154,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
   int fp;
 
   strcpy(filename, data+2);
+  syslog(LOG_ERR,"RRQ: %s", filename);
   printf("New Read Rq: %s\n", filename);
 
   fp = open(filename, O_RDONLY );
@@ -162,10 +164,10 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
       close(fp);
       return -1;
     } else {
-			ptr->block_number = 1;
-			ptr->fp = fp;
-			return 0;
-		}
+      ptr->block_number = 1;
+      ptr->fp = fp;
+      return 0;
+    }
   }
   return -1;
 }
@@ -179,6 +181,7 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
   int fp;
 
   strcpy(filename, data+2);
+  syslog(LOG_ERR,"WRQ: %s", filename);
   printf("New Write Rq: %s\n", filename);
 
   mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
@@ -189,12 +192,12 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
       close(fp);
       return -1;
     } else {
-			ptr->block_number = 0;
-			ptr->fp = fp;
-			ptr->write = 1;	// singal that this connection is a WRQ type.
-			TFTP_SendAck(ptr->block_number,  address);
-			return 0;
-		}
+      ptr->block_number = 0;
+      ptr->fp = fp;
+      ptr->write = 1;	// signal that this connection is a WRQ type.
+      TFTP_SendAck(ptr->block_number,  address);
+      return 0;
+    }
   }
   return -1;
 }
@@ -220,6 +223,7 @@ void TFTP_ProcessPacket(int opcode, char *data, int length, struct sockaddr_stor
 
       if (( length < (512+2)) || ( rv < 0 )) {
         // sub size packet, enf of file.
+        syslog(LOG_ERR,"File transfer complete, received %d bytes", (ptr->block_number*512)+(length-2));
         printf("File transfer complete\n");
         close(ptr->fp);
         ptr->fp = -1;
@@ -247,6 +251,8 @@ int main( int argc, char *argv[] )
 
   // ------------------------------------
   // Set up Syslog.
+  openlog("TFTP_Server", LOG_PID, LOG_USER);
+  syslog(LOG_ERR,"TFTP_Server online");
 
   // ------------------------------------
   // set up UDP listner.
