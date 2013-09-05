@@ -28,6 +28,7 @@ struct TFTP_Con {
   struct sockaddr_storage address;
   int fp;
   unsigned write:1;
+  time_t start_time;
   time_t activity_time;
   int block_number;
   char buf[TFTP_BUF_SIZE];
@@ -66,6 +67,7 @@ struct TFTP_Con *TFTP_CreateNewConnection(struct sockaddr_storage *address) {
 
   // parse data for information
   ptr->address = *address;
+	ptr->start_time = time(NULL);
 
   return ptr;
 }
@@ -182,7 +184,6 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
 
   strcpy(filename, data+2);
   syslog(LOG_ERR,"WRQ: %s", filename);
-  printf("New Write Rq: %s\n", filename);
 
   mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
   fp = open(filename, O_WRONLY | O_CREAT, mode );
@@ -207,6 +208,7 @@ void TFTP_ProcessPacket(int opcode, char *data, int length, struct sockaddr_stor
 {
   struct TFTP_Con *ptr;
   int block_number, rv;
+	int diff;
 
   ptr = TFTP_FindConnection(address);
   if ( ptr == NULL )
@@ -214,8 +216,7 @@ void TFTP_ProcessPacket(int opcode, char *data, int length, struct sockaddr_stor
 
   block_number = (data[0] * 256) | data[1];
   if ( block_number == ptr->block_number ) {
-    printf("Error, brown trousers time\n");
-
+    syslog(LOG_ERR,"Error, bad block number");
   } else {
     if ( ptr->write ) {
       rv = write( ptr->fp, data+2, length -2);
@@ -223,8 +224,10 @@ void TFTP_ProcessPacket(int opcode, char *data, int length, struct sockaddr_stor
 
       if (( length < (512+2)) || ( rv < 0 )) {
         // sub size packet, enf of file.
-        syslog(LOG_ERR,"File transfer complete, received %d bytes", (ptr->block_number*512)+(length-2));
-        printf("File transfer complete\n");
+				diff = time(NULL) - ptr->start_time;
+				if ( diff == 0 )
+					diff = 1;
+        syslog(LOG_ERR,"File transfer complete, received %d bytes in %d seconds", (ptr->block_number*512)+(length-2), diff);
         close(ptr->fp);
         ptr->fp = -1;
       }
@@ -262,24 +265,24 @@ int main( int argc, char *argv[] )
   hints.ai_flags = AI_PASSIVE; // use my IP
 
   if ((rv = getaddrinfo(NULL, MYPORT, &hints, &servinfo)) != 0) {
-    fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+    syslog(LOG_ERR,"getaddrinfo: %s\n", gai_strerror(rv));
     return 1;
   }
   // loop through all the results and bind to the first we can
   for(p = servinfo; p != NULL; p = p->ai_next) {
     if ((ListenSocket = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-      perror("listener: socket");
+			syslog(LOG_ERR,"listner: socket");
       continue;
     }
     if (bind(ListenSocket, p->ai_addr, p->ai_addrlen) == -1) {
       close(ListenSocket);
-      perror("listener: bind");
+			syslog(LOG_ERR,"listner: bind");
       continue;
     }
     break;
   }
   if (p == NULL) {
-    fprintf(stderr, "listener: failed to bind socket\n");
+		syslog(LOG_ERR,"listner: failed to bind socket");
     return 2;
   }
   freeaddrinfo(servinfo);
@@ -293,7 +296,7 @@ int main( int argc, char *argv[] )
 
   ConnectionList = malloc( sizeof(struct TFTP_Con) * Max_Connections);
   if ( ConnectionList == NULL ) {
-    fprintf(stderr, "ConnectionList: malloc()\n");
+		syslog(LOG_ERR,"ConnectionList: malloc()");
     return -1;
   }
 
@@ -316,8 +319,8 @@ int main( int argc, char *argv[] )
         // read out packet.
         addr_len = sizeof(struct sockaddr);
         bytes = recvfrom(ListenSocket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
-        if ( bytes == -1) {
-          perror("recvfrom");
+        if ( bytes < 0) {
+					syslog(LOG_ERR,"recvfrom: %d", bytes);
           exit(1);
         }
         if ( bytes == 0 ) {
