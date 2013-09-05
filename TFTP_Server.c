@@ -179,19 +179,16 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
 {
   mode_t mode;
   struct TFTP_Con *ptr;
-  char filename[256];
   int fp;
 
-  strcpy(filename, data+2);
-  syslog(LOG_ERR,"WRQ: %s", filename);
+  syslog(LOG_ERR,"WRQ: %s", data+2);
 
   mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
-  fp = open(filename, O_WRONLY | O_CREAT, mode );
+  fp = open(data+2, O_WRONLY | O_CREAT, mode );
   if ( fp >= 0 ) {
     ptr = TFTP_CreateNewConnection(address);
     if ( ptr == NULL ) {
       close(fp);
-      return -1;
     } else {
       ptr->block_number = 0;
       ptr->fp = fp;
