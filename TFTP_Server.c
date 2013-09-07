@@ -19,25 +19,16 @@
 
 // *******************************************************************************************
 // *******************************************************************************************
-int ListenSocket;
 
 #define TFTP_BUF_SIZE	(512+2+2)
 #define MYPORT    "69"
+#define TFTP_RRQ		1
+#define TFTP_WRQ		2
+#define TFTP_DATA		3
+#define TFTP_ACK		4
+#define TFTP_ERROR		5
 
-struct TFTP_Con {
-  struct sockaddr_storage address;
-  int fp;
-  unsigned write:1;
-  time_t start_time;
-  time_t activity_time;
-  int block_number;
-  char buf[TFTP_BUF_SIZE];
-  int data_length;
-};
-
-struct TFTP_Con **ConnectionList;
-int Max_Connections;
-int NoAct_Timeout;	// seconds
+#define ACT_TIMEOUT		2
 
 // *******************************************************************************************
 // get sockaddr, IPv4 or IPv6:
@@ -50,94 +41,60 @@ void *get_in_addr(struct sockaddr *sa)
 }
 
 // *******************************************************************************************
-struct TFTP_Con *TFTP_CreateNewConnection(struct sockaddr_storage *address) {
-  struct TFTP_Con *ptr = NULL;
-  int i;
-
-  // create new connection in array.
-  for ( i = 0; i < Max_Connections; i ++ ) {
-    if ( ConnectionList[i] == NULL ) {
-      ptr = malloc(sizeof (struct TFTP_Con));
-      ConnectionList[i] = ptr;
-      break;
-    }
-  }
-  if ( ptr == NULL )
-    return NULL;
-
-  // parse data for information
-  ptr->address = *address;
-	ptr->start_time = time(NULL);
-
-  return ptr;
-}
-
-// *******************************************************************************************
-void CloseConnection(int index)
+int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
 {
-  struct TFTP_Con *ptr;
+//  fd_set readFD;
+//  struct timeval timeout;
+//  struct sockaddr_storage their_addr;
+//  socklen_t addr_len;
+//  time_t start_time;
+  int rrq_socket;
+  int fp;
+//  int opcode, packet_block, last_block;
+//  char packet_buff[TFTP_BUF_SIZE];
+//  int bytes, rv, diff;
+  char client_name[256];
 
-  ptr = ConnectionList[index];
-  if ( ptr ) {
-    ConnectionList[index] = NULL;
+  inet_ntop(address->ss_family,get_in_addr((struct sockaddr *)address),client_name, sizeof (client_name));
+  syslog(LOG_ERR,"RRQ: %s, %s", client_name, data+2);
+  printf("New Read Rq: %s\n", data+2);
 
-    if ( ptr->fp >= 0 )
-      close(ptr->fp);
-    free(ptr);
+  if ((rrq_socket = socket(AF_UNSPEC, SOCK_DGRAM, IPPROTO_IP)) == -1) {
+    syslog(LOG_ERR,"WRQ: listner: socket");
+    return -1;
   }
-}
 
-// *******************************************************************************************
-void Connection_RunTimers(void)
-{
-  struct TFTP_Con *ptr;
-  int current_time, i;
+  fp = open(data + 2, O_RDONLY );
+  if ( fp < 0 )
+    return -1;
+  /*
+    last_block = 1;
+    start_time = time(NULL);
 
-  current_time = time(NULL);
+    do
+    {
 
-  for ( i = 0; i < Max_Connections; i ++ ) {
-    ptr = ConnectionList[i];
-    if ( ptr == NULL )
-      continue;
-    if ( ( current_time - ptr->activity_time ) > NoAct_Timeout) {
-      // no activity close connection.
-      printf("Closing con, timeout\n");
-      CloseConnection(i);
+      rv = sendto(rrq_socket, buf, 4, 0, (const struct sockaddr *) address, sizeof(struct sockaddr));
+
+
+      FD_ZERO(&readFD);
+      FD_SET(wrq_socket, &readFD);
+      timeout.tv_sec = ACT_TIMEOUT;
+      timeout.tv_usec = 0;
+
+      if ( select(wrq_socket+1, &readFD, NULL, NULL, &timeout) > 0 ) {
+        if ( FD_ISSET(wrq_socket, &readFD) ) {
+
+      syslog(LOG_ERR,"Transfer from %s complete, %d bytes in %d seconds", client_name, (last_block*512)+(bytes-2), diff);
+
     }
-    if ( ptr->fp == -1 ) {
-      // no activity close connection.
-      printf("Closing con\n");
-      CloseConnection(i);
-    }
-  }
+    while ( 1 );
+  */
+  return -1;
 }
 
 // *******************************************************************************************
-void System_Shutdown(void)
-{
-  close(ListenSocket);
-}
-
-// *******************************************************************************************
-struct TFTP_Con *TFTP_FindConnection(struct sockaddr_storage *address) {
-  struct TFTP_Con *ptr;
-  int i;
-
-  for ( i = 0; i < Max_Connections; i ++ ) {
-    ptr = ConnectionList[i];
-    if ( ptr == NULL )
-      continue;
-    if ( memcmp(&ptr->address, address, sizeof(struct sockaddr_storage)) == 0 ) {
-//      printf("Match Addr\n");
-      return ptr;
-    }
-  }
-  printf("No Match\n");
-  return NULL;
-}
-
-// *******************************************************************************************
-void TFTP_SendAck(int block_number, struct sockaddr_storage *address)
+void TFTP_SendAck(int block_number, int sock, struct sockaddr_storage *address)
 {
   char buf[4];
 
@@ -145,101 +102,117 @@ void TFTP_SendAck(int block_number, struct sockaddr_storage *address)
   buf[1] = 4;
   buf[2] = (block_number / 256);
   buf[3] = (block_number % 256);
-  sendto(ListenSocket, buf, 4, 0, (const struct sockaddr *) address, sizeof(struct sockaddr));
-}
-
-// *******************************************************************************************
-int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
-{
-  struct TFTP_Con *ptr;
-  char filename[256];
-  int fp;
-
-  strcpy(filename, data+2);
-  syslog(LOG_ERR,"RRQ: %s", filename);
-  printf("New Read Rq: %s\n", filename);
-
-  fp = open(filename, O_RDONLY );
-  if ( fp >= 0 ) {
-    ptr = TFTP_CreateNewConnection(address);
-    if ( ptr == NULL ) {
-      close(fp);
-      return -1;
-    } else {
-      ptr->block_number = 1;
-      ptr->fp = fp;
-      return 0;
-    }
-  }
-  return -1;
+  sendto(sock, buf, 4, 0, (const struct sockaddr *) address, sizeof(struct sockaddr));
+  printf("A: %d\n", block_number);
 }
 
 // *******************************************************************************************
 int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
 {
+  fd_set readFD;
+  struct timeval timeout;
+  struct sockaddr_storage their_addr;
+  socklen_t addr_len;
+  time_t start_time;
   mode_t mode;
-  struct TFTP_Con *ptr;
+  int wrq_socket;
   int fp;
+  int opcode, packet_block, last_block;
+  char packet_buff[TFTP_BUF_SIZE];
+  int bytes, rv, diff;
+  char client_name[256];
+  int errors = 1;
 
-  syslog(LOG_ERR,"WRQ: %s", data+2);
+  // ------------------------------------
+  // set up UDP listner.
+  if ((wrq_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP)) == -1) {
+    syslog(LOG_ERR,"WRQ: listner: socket");
+    perror("WRQ: Listner");
+    return -1;
+  }
 
+  inet_ntop(address->ss_family,get_in_addr((struct sockaddr *)address),client_name, sizeof (client_name));
+  syslog(LOG_ERR,"WRQ: %s, %s", client_name, data+2);
   mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
   fp = open(data+2, O_WRONLY | O_CREAT, mode );
-  if ( fp >= 0 ) {
-    ptr = TFTP_CreateNewConnection(address);
-    if ( ptr == NULL ) {
-      close(fp);
-    } else {
-      ptr->block_number = 0;
-      ptr->fp = fp;
-      ptr->write = 1;	// signal that this connection is a WRQ type.
-      TFTP_SendAck(ptr->block_number,  address);
-      return 0;
-    }
-  }
-  return -1;
-}
+  if ( fp < 0 )
+    return -1;
 
-// *******************************************************************************************
-void TFTP_ProcessPacket(int opcode, char *data, int length, struct sockaddr_storage *address)
-{
-  struct TFTP_Con *ptr;
-  int block_number, rv;
-	int diff;
+  last_block = 0;
+  start_time = time(NULL);
+  TFTP_SendAck(last_block, wrq_socket, address);
 
-  ptr = TFTP_FindConnection(address);
-  if ( ptr == NULL )
-    return ;
+  while ( 1 ) {
+    FD_ZERO(&readFD);
+    FD_SET(wrq_socket, &readFD);
+    timeout.tv_sec = ACT_TIMEOUT;
+    timeout.tv_usec = 0;
 
-  block_number = (data[0] * 256) | data[1];
-  if ( block_number == ptr->block_number ) {
-    syslog(LOG_ERR,"Error, bad block number");
-  } else {
-    if ( ptr->write ) {
-      rv = write( ptr->fp, data+2, length -2);
-      ptr->block_number++;
+    if ( select(wrq_socket+1, &readFD, NULL, NULL, &timeout) > 0 ) {
+      if ( FD_ISSET(wrq_socket, &readFD) ) {
 
-      if (( length < (512+2)) || ( rv < 0 )) {
-        // sub size packet, enf of file.
-				diff = time(NULL) - ptr->start_time;
-				if ( diff == 0 )
-					diff = 1;
-        syslog(LOG_ERR,"File transfer complete, received %d bytes in %d seconds", (ptr->block_number*512)+(length-2), diff);
-        close(ptr->fp);
-        ptr->fp = -1;
+        // read out packet.
+        addr_len = sizeof(struct sockaddr);
+        bytes = recvfrom(wrq_socket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
+        if ( bytes <= 0 ) {
+          syslog(LOG_ERR,"recvfrom: %d", bytes);
+          break;
+        }
+        printf("Data: %d\n", bytes);
+        opcode = packet_buff[1];
+        if ( opcode == TFTP_DATA ) {
+          packet_block = (packet_buff[2] * 256) | packet_buff[3];
+          if ( packet_block != last_block ) {
+            errors = 5;		// so we don't allow more than 3 consecutive errors.
+						printf("Write\n");
+            rv = write( fp, packet_buff+4, bytes -4);
+            last_block++;
+
+            if (( bytes < TFTP_BUF_SIZE) || ( rv < 0 )) {
+              // sub size packet, end of file.
+              diff = time(NULL) - start_time;
+              if ( diff == 0 )
+                diff = 1;
+              syslog(LOG_ERR,"Transfer from %s complete, %d bytes in %d seconds", client_name, (last_block*512)+(bytes-2), diff);
+              TFTP_SendAck(last_block, wrq_socket, address);
+              break;
+            }
+            TFTP_SendAck(last_block, wrq_socket, address);
+            continue;
+          } else {
+						printf("Pack: %d / %d\n", packet_block, last_block);
+					}
+        } else if ( opcode == TFTP_ERROR ) {
+					printf("Opcode: Error\n");
+          syslog(LOG_ERR,"Some sort of error :(");
+          break;
+        } else {
+					printf("Opcode: %d\n", opcode);
+				}
+      } else {
+        syslog(LOG_ERR,"Timeout: Block %d", last_block);
+        TFTP_SendAck(last_block, wrq_socket, address);
       }
-      // Send Ack.
-      TFTP_SendAck(ptr->block_number, address);
-
-    } else {
-      // make sure its an ack.
     }
+    if ( errors ) {
+      errors--;
+    } else {
+      syslog(LOG_ERR,"Too many errors, closing connection");
+      break;
+    }
+    printf("Error: %d\n", errors);
+    TFTP_SendAck(last_block, wrq_socket, address);
   }
+  printf("Close child\n");
+  close(fp);
+  close(wrq_socket);
+  return 0;
 }
 
 // *******************************************************************************************
 int main( int argc, char *argv[] )
 {
+  int ListenSocket;
   struct addrinfo hints, *servinfo, *p;
   struct timeval timeout;
   struct sockaddr_storage their_addr;
@@ -248,6 +221,7 @@ int main( int argc, char *argv[] )
   char packet_buff[TFTP_BUF_SIZE];
   int bytes, rv;
   int opcode;
+  pid_t pid;
 
   // ------------------------------------
   // Set up Syslog.
@@ -268,36 +242,21 @@ int main( int argc, char *argv[] )
   // loop through all the results and bind to the first we can
   for(p = servinfo; p != NULL; p = p->ai_next) {
     if ((ListenSocket = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-			syslog(LOG_ERR,"listner: socket");
+      syslog(LOG_ERR,"listner: socket");
       continue;
     }
     if (bind(ListenSocket, p->ai_addr, p->ai_addrlen) == -1) {
       close(ListenSocket);
-			syslog(LOG_ERR,"listner: bind");
+      syslog(LOG_ERR,"listner: bind");
       continue;
     }
     break;
   }
   if (p == NULL) {
-		syslog(LOG_ERR,"listner: failed to bind socket");
+    syslog(LOG_ERR,"listner: failed to bind socket");
     return 2;
   }
   freeaddrinfo(servinfo);
-
-  // ------------------------------------
-  // Set up Client Array.
-  if ( Max_Connections <= 0 )
-    Max_Connections = 25;
-  if ( NoAct_Timeout <= 0 )
-    NoAct_Timeout = 120;
-
-  ConnectionList = malloc( sizeof(struct TFTP_Con) * Max_Connections);
-  if ( ConnectionList == NULL ) {
-		syslog(LOG_ERR,"ConnectionList: malloc()");
-    return -1;
-  }
-
-  memset(ConnectionList, 0, sizeof(struct TFTP_Con) * Max_Connections);
 
   // ------------------------------------
   // set up signal handlers.
@@ -307,7 +266,7 @@ int main( int argc, char *argv[] )
   while ( 1 ) {
     FD_ZERO(&ReadFD);
 
-    timeout.tv_sec = 2;
+    timeout.tv_sec = ACT_TIMEOUT;
     timeout.tv_usec = 0;
     FD_SET(ListenSocket, &ReadFD);
 
@@ -317,28 +276,42 @@ int main( int argc, char *argv[] )
         addr_len = sizeof(struct sockaddr);
         bytes = recvfrom(ListenSocket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
         if ( bytes < 0) {
-					syslog(LOG_ERR,"recvfrom: %d", bytes);
+          syslog(LOG_ERR,"recvfrom: %d", bytes);
           exit(1);
         }
         if ( bytes == 0 ) {
           continue;
         }
+
         opcode = packet_buff[1];
-        switch ( opcode ) {
 
-        case 1:	// read request
-          TFTP_NewReadRequest(packet_buff, &their_addr);
-          break;
+        if ( opcode == TFTP_RRQ ) {
+          pid = fork();
+          if ( pid == 0 ) { // child
+            printf("Forked RRQ\n");
+            return TFTP_NewReadRequest(packet_buff, &their_addr);
 
-        case 2:	// write request
-          TFTP_NewWriteRequest(packet_buff, &their_addr);
-          break;
+          } else if ( pid < 0 ) {
+            printf("Failed to fork\n");
+            return -1;
 
-        case 3:	// Data
-        case 4:	// Ack
-        default:	// error
-          TFTP_ProcessPacket(opcode, packet_buff+2, bytes-2, &their_addr);
-          break;
+          } else {
+            printf("Created a child\n");
+          }
+
+        } else if ( opcode == TFTP_WRQ ) {
+          pid = fork();
+          if ( pid == 0 ) { // child
+            printf("Forked WRQ\n");
+            return TFTP_NewWriteRequest(packet_buff, &their_addr);
+
+          } else if ( pid < 0 ) {
+            printf("Failed to fork\n");
+            return -1;
+
+          } else {
+            printf("Created a child\n");
+          }
         }
       }
     }
