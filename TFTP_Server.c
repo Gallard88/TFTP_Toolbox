@@ -74,10 +74,8 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
 
   inet_ntop(address->ss_family,get_in_addr((struct sockaddr *)address),client_name, sizeof (client_name));
   syslog(LOG_ERR,"RRQ: %s, %s", client_name, data+2);
-  printf("New Read Rq: %s\n", data+2);
 
   if ((rrq_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP)) == -1) {
-		printf("WRQ: listner: socket\n");
     syslog(LOG_ERR,"WRQ: listner: socket");
     return -1;
   }
@@ -338,34 +336,26 @@ int main( int argc, char *argv[] )
         if ( opcode == TFTP_RRQ ) {
           pid = fork();
           if ( pid == 0 ) { // child
-            printf("Forked RRQ\n");
             return TFTP_NewReadRequest(packet_buff, &their_addr);
 
           } else if ( pid < 0 ) {
-            printf("Failed to fork\n");
+						syslog(LOG_ERR,"RRQ: Fork error");
             return -1;
-
-          } else {
-            printf("Created a child\n");
           }
-
         } else if ( opcode == TFTP_WRQ ) {
           pid = fork();
           if ( pid == 0 ) { // child
-            printf("Forked WRQ\n");
             return TFTP_NewWriteRequest(packet_buff, &their_addr);
 
           } else if ( pid < 0 ) {
-            printf("Failed to fork\n");
+						syslog(LOG_ERR,"WRQ: Fork error");
             return -1;
-
-          } else {
-            printf("Created a child\n");
           }
         }
       }
     }
   }
+  close(ListenSocket);
   return 0;
 }
 
