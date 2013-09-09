@@ -33,6 +33,8 @@
 #define ACT_TIMEOUT		2
 
 // *******************************************************************************************
+const char Default_Dir[] = "/srv/";
+// *******************************************************************************************
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
 {
@@ -65,7 +67,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
   socklen_t addr_len;
   time_t start_time;
   char rec_buff[TFTP_ACK_SIZE], send_buff[TFTP_BUF_SIZE];
-  char filename[TFTP_BUF_SIZE];
+  char filename[TFTP_BUF_SIZE*2];
   int rrq_socket;
   int fp;
   int opcode, packet_block, last_block;
@@ -74,20 +76,25 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
   int errors = 5;	// allow no more than 5 errors per trasnfer.
 
   inet_ntop(address->ss_family,get_in_addr((struct sockaddr *)address),client_name, sizeof (client_name));
-  if ( strstr(filename, "..") == 0) {
-    syslog(LOG_ERR,"RRQ: %s, invalid filename %s", client_name, filename);
+  if ( strstr(data+2, "..") != NULL ) {
+    syslog(LOG_ERR,"RRQ: %s, invalid filename %s", client_name, data+2);
     return -1;
   }
-  syslog(LOG_ERR,"RRQ: %s, %s", client_name, filename);
+  strcpy(filename, Default_Dir);
+  strcat(filename, data+2 );
+
+  syslog(LOG_ERR,"RRQ: %s, %s", client_name, data+2);
 
   if ((rrq_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP)) == -1) {
     syslog(LOG_ERR,"WRQ: listner: socket");
     return -1;
   }
 
-  fp = open(data + 2, O_RDONLY );
-  if ( fp < 0 )
+  fp = open(filename, O_RDONLY );
+  if ( fp < 0 ) {
+    syslog(LOG_ERR,"RRQ: file doesn't exist");
     return -1;
+  }
 
   last_block = 1;
   packet_block = 0;
@@ -181,7 +188,7 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
   int fp;
   int opcode, packet_block, last_block;
   char packet_buff[TFTP_BUF_SIZE];
-  char filename[TFTP_BUF_SIZE];
+  char filename[TFTP_BUF_SIZE*2];
   int bytes, rv, diff;
   char client_name[256];
   int errors = 5;	// allow no more than 5 errors per trasnfer.
@@ -194,72 +201,77 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
   }
 
   inet_ntop(address->ss_family,get_in_addr((struct sockaddr *)address),client_name, sizeof (client_name));
-  strncpy(filename, data+2, TFTP_BUF_SIZE);
-  if ( strstr(filename, "..") == 0) {
-    syslog(LOG_ERR,"WRQ: %s, invalid filename %s", client_name, filename);
+
+  if ( strstr(data+2, "..") != NULL ) {
+    syslog(LOG_ERR,"WRQ: %s, invalid filename %s", client_name, data+2);
     return -1;
   }
-  syslog(LOG_ERR,"WRQ: %s, %s", client_name, filename);
+  strcpy(filename, Default_Dir);
+  strcat(filename, data+2 );
+  syslog(LOG_ERR,"WRQ: %s, %s", client_name, data+2);
   mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
-  fp = open(data+2, O_WRONLY | O_CREAT, mode );
-  if ( fp >= 0 ) {
+  fp = open(filename, O_WRONLY | O_CREAT, mode );
+  if ( fp < 0 ) {
+    syslog(LOG_ERR,"WRQ: failed to open file for writing");
+    return -1;
+  }
 
-    last_block = 0;
-    start_time = time(NULL);
-    TFTP_SendAck(last_block, wrq_socket, address);
 
-    while ( 1 ) {
-      FD_ZERO(&readFD);
-      FD_SET(wrq_socket, &readFD);
-      timeout.tv_sec = ACT_TIMEOUT;
-      timeout.tv_usec = 0;
+  last_block = 0;
+  start_time = time(NULL);
+  TFTP_SendAck(last_block, wrq_socket, address);
 
-      if ( select(wrq_socket+1, &readFD, NULL, NULL, &timeout) > 0 ) {
-        if ( FD_ISSET(wrq_socket, &readFD) ) {
+  while ( 1 ) {
+    FD_ZERO(&readFD);
+    FD_SET(wrq_socket, &readFD);
+    timeout.tv_sec = ACT_TIMEOUT;
+    timeout.tv_usec = 0;
 
-          // read out packet.
-          addr_len = sizeof(struct sockaddr);
-          bytes = recvfrom(wrq_socket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
-          if ( bytes <= 0 ) {
-            syslog(LOG_ERR,"recvfrom: %d", bytes);
-            break;
-          }
-          opcode = packet_buff[1];
-          if ( opcode == TFTP_DATA ) {
-            packet_block = (packet_buff[2] * 256) | packet_buff[3];
-            if ( packet_block != last_block ) {
-              rv = write( fp, packet_buff+4, bytes -4);
-              last_block++;
+    if ( select(wrq_socket+1, &readFD, NULL, NULL, &timeout) > 0 ) {
+      if ( FD_ISSET(wrq_socket, &readFD) ) {
 
-              if (( bytes < TFTP_BUF_SIZE) || ( rv < 0 )) {
-                // sub size packet, end of file.
-                diff = time(NULL) - start_time;
-                if ( diff == 0 )
-                  diff = 1;
-                syslog(LOG_ERR,"Transfer from %s complete, %d bytes in %d seconds", client_name, (last_block*512)+(bytes-2), diff);
-                TFTP_SendAck(last_block, wrq_socket, address);
-                break;
-              }
-              TFTP_SendAck(last_block, wrq_socket, address);
-              continue;
-            }
-          } else if ( opcode == TFTP_ERROR ) {
-            syslog(LOG_ERR,"Some sort of error :(");
-            break;
-          }
-        } else {
-          syslog(LOG_ERR,"Timeout: Block %d", last_block);
-          TFTP_SendAck(last_block, wrq_socket, address);
+        // read out packet.
+        addr_len = sizeof(struct sockaddr);
+        bytes = recvfrom(wrq_socket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
+        if ( bytes <= 0 ) {
+          syslog(LOG_ERR,"recvfrom: %d", bytes);
+          break;
         }
-      }
-      if ( errors ) {
-        errors--;
+        opcode = packet_buff[1];
+        if ( opcode == TFTP_DATA ) {
+          packet_block = (packet_buff[2] * 256) | packet_buff[3];
+          if ( packet_block != last_block ) {
+            rv = write( fp, packet_buff+4, bytes -4);
+            last_block++;
+
+            if (( bytes < TFTP_BUF_SIZE) || ( rv < 0 )) {
+              // sub size packet, end of file.
+              diff = time(NULL) - start_time;
+              if ( diff == 0 )
+                diff = 1;
+              syslog(LOG_ERR,"Transfer from %s complete, %d bytes in %d seconds", client_name, (last_block*512)+(bytes-2), diff);
+              TFTP_SendAck(last_block, wrq_socket, address);
+              break;
+            }
+            TFTP_SendAck(last_block, wrq_socket, address);
+            continue;
+          }
+        } else if ( opcode == TFTP_ERROR ) {
+          syslog(LOG_ERR,"Some sort of error :(");
+          break;
+        }
       } else {
-        syslog(LOG_ERR,"Too many errors, closing connection");
-        break;
+        syslog(LOG_ERR,"Timeout: Block %d", last_block);
+        TFTP_SendAck(last_block, wrq_socket, address);
       }
-      TFTP_SendAck(last_block, wrq_socket, address);
     }
+    if ( errors ) {
+      errors--;
+    } else {
+      syslog(LOG_ERR,"Too many errors, closing connection");
+      break;
+    }
+    TFTP_SendAck(last_block, wrq_socket, address);
   }
   close(fp);
   close(wrq_socket);
@@ -286,12 +298,12 @@ int main( int argc, char *argv[] )
   syslog(LOG_ERR,"TFTP_Server online");
 
   // ------------------------------------
-	if ( daemon( 1, 0 ) < 0 ) { // keep dir
-		syslog(LOG_ERR,"daemonise failed");
-		return -1;
-	}
+  if ( daemon( 1, 0 ) < 0 ) { // keep dir
+    syslog(LOG_ERR,"daemonise failed");
+    return -1;
+  }
 
-	// ------------------------------------
+  // ------------------------------------
   // set up UDP listner.
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC; // set to AF_INET to force IPv4
