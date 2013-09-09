@@ -103,7 +103,6 @@ void TFTP_SendAck(int block_number, int sock, struct sockaddr_storage *address)
   buf[2] = (block_number / 256);
   buf[3] = (block_number % 256);
   sendto(sock, buf, 4, 0, (const struct sockaddr *) address, sizeof(struct sockaddr));
-  printf("A: %d\n", block_number);
 }
 
 // *******************************************************************************************
@@ -121,13 +120,12 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
   char packet_buff[TFTP_BUF_SIZE];
   int bytes, rv, diff;
   char client_name[256];
-  int errors = 1;
+  int errors = 5;	// allow no more than 5 errors per trasnfer.
 
   // ------------------------------------
   // set up UDP listner.
   if ((wrq_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP)) == -1) {
     syslog(LOG_ERR,"WRQ: listner: socket");
-    perror("WRQ: Listner");
     return -1;
   }
 
@@ -135,75 +133,66 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
   syslog(LOG_ERR,"WRQ: %s, %s", client_name, data+2);
   mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
   fp = open(data+2, O_WRONLY | O_CREAT, mode );
-  if ( fp < 0 )
-    return -1;
+  if ( fp >= 0 ) {
 
-  last_block = 0;
-  start_time = time(NULL);
-  TFTP_SendAck(last_block, wrq_socket, address);
-
-  while ( 1 ) {
-    FD_ZERO(&readFD);
-    FD_SET(wrq_socket, &readFD);
-    timeout.tv_sec = ACT_TIMEOUT;
-    timeout.tv_usec = 0;
-
-    if ( select(wrq_socket+1, &readFD, NULL, NULL, &timeout) > 0 ) {
-      if ( FD_ISSET(wrq_socket, &readFD) ) {
-
-        // read out packet.
-        addr_len = sizeof(struct sockaddr);
-        bytes = recvfrom(wrq_socket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
-        if ( bytes <= 0 ) {
-          syslog(LOG_ERR,"recvfrom: %d", bytes);
-          break;
-        }
-        printf("Data: %d\n", bytes);
-        opcode = packet_buff[1];
-        if ( opcode == TFTP_DATA ) {
-          packet_block = (packet_buff[2] * 256) | packet_buff[3];
-          if ( packet_block != last_block ) {
-            errors = 5;		// so we don't allow more than 3 consecutive errors.
-						printf("Write\n");
-            rv = write( fp, packet_buff+4, bytes -4);
-            last_block++;
-
-            if (( bytes < TFTP_BUF_SIZE) || ( rv < 0 )) {
-              // sub size packet, end of file.
-              diff = time(NULL) - start_time;
-              if ( diff == 0 )
-                diff = 1;
-              syslog(LOG_ERR,"Transfer from %s complete, %d bytes in %d seconds", client_name, (last_block*512)+(bytes-2), diff);
-              TFTP_SendAck(last_block, wrq_socket, address);
-              break;
-            }
-            TFTP_SendAck(last_block, wrq_socket, address);
-            continue;
-          } else {
-						printf("Pack: %d / %d\n", packet_block, last_block);
-					}
-        } else if ( opcode == TFTP_ERROR ) {
-					printf("Opcode: Error\n");
-          syslog(LOG_ERR,"Some sort of error :(");
-          break;
-        } else {
-					printf("Opcode: %d\n", opcode);
-				}
-      } else {
-        syslog(LOG_ERR,"Timeout: Block %d", last_block);
-        TFTP_SendAck(last_block, wrq_socket, address);
-      }
-    }
-    if ( errors ) {
-      errors--;
-    } else {
-      syslog(LOG_ERR,"Too many errors, closing connection");
-      break;
-    }
-    printf("Error: %d\n", errors);
+    last_block = 0;
+    start_time = time(NULL);
     TFTP_SendAck(last_block, wrq_socket, address);
+
+    while ( 1 ) {
+      FD_ZERO(&readFD);
+      FD_SET(wrq_socket, &readFD);
+      timeout.tv_sec = ACT_TIMEOUT;
+      timeout.tv_usec = 0;
+
+      if ( select(wrq_socket+1, &readFD, NULL, NULL, &timeout) > 0 ) {
+        if ( FD_ISSET(wrq_socket, &readFD) ) {
+
+          // read out packet.
+          addr_len = sizeof(struct sockaddr);
+          bytes = recvfrom(wrq_socket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
+          if ( bytes <= 0 ) {
+            syslog(LOG_ERR,"recvfrom: %d", bytes);
+            break;
+          }
+          opcode = packet_buff[1];
+          if ( opcode == TFTP_DATA ) {
+            packet_block = (packet_buff[2] * 256) | packet_buff[3];
+            if ( packet_block != last_block ) {
+              rv = write( fp, packet_buff+4, bytes -4);
+              last_block++;
+
+              if (( bytes < TFTP_BUF_SIZE) || ( rv < 0 )) {
+                // sub size packet, end of file.
+                diff = time(NULL) - start_time;
+                if ( diff == 0 )
+                  diff = 1;
+                syslog(LOG_ERR,"Transfer from %s complete, %d bytes in %d seconds", client_name, (last_block*512)+(bytes-2), diff);
+                TFTP_SendAck(last_block, wrq_socket, address);
+                break;
+              }
+              TFTP_SendAck(last_block, wrq_socket, address);
+              continue;
+            }
+          } else if ( opcode == TFTP_ERROR ) {
+            syslog(LOG_ERR,"Some sort of error :(");
+            break;
+          }
+        } else {
+          syslog(LOG_ERR,"Timeout: Block %d", last_block);
+          TFTP_SendAck(last_block, wrq_socket, address);
+        }
+      }
+      if ( errors ) {
+        errors--;
+      } else {
+        syslog(LOG_ERR,"Too many errors, closing connection");
+        break;
+      }
+      printf("Error: %d\n", errors);
+      TFTP_SendAck(last_block, wrq_socket, address);
+    }
   }
-  printf("Close child\n");
   close(fp);
   close(wrq_socket);
   return 0;
