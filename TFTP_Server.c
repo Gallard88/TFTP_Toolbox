@@ -300,12 +300,11 @@ int main( int argc, char *argv[] )
   syslog(LOG_ERR,"TFTP_Server online");
 
   // ------------------------------------
-/*
   if ( daemon( 1, 0 ) < 0 ) { // keep dir
     syslog(LOG_ERR,"daemonise failed");
     return -1;
   }
-*/
+
   // ------------------------------------
   if ( argc == 2 ) {
 		strncpy(SystemDir, argv[1], sizeof(SystemDir) - TFTP_BUF_SIZE);
