@@ -65,6 +65,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
   socklen_t addr_len;
   time_t start_time;
   char rec_buff[TFTP_ACK_SIZE], send_buff[TFTP_BUF_SIZE];
+  char filename[TFTP_BUF_SIZE];
   int rrq_socket;
   int fp;
   int opcode, packet_block, last_block;
@@ -73,7 +74,11 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
   int errors = 5;	// allow no more than 5 errors per trasnfer.
 
   inet_ntop(address->ss_family,get_in_addr((struct sockaddr *)address),client_name, sizeof (client_name));
-  syslog(LOG_ERR,"RRQ: %s, %s", client_name, data+2);
+  if ( strstr(filename, "..") == 0) {
+    syslog(LOG_ERR,"RRQ: %s, invalid filename %s", client_name, filename);
+    return -1;
+  }
+  syslog(LOG_ERR,"RRQ: %s, %s", client_name, filename);
 
   if ((rrq_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP)) == -1) {
     syslog(LOG_ERR,"WRQ: listner: socket");
@@ -139,12 +144,12 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
         }
       }
     }
-		if ( errors ) {
-			errors--;
-		} else {
-			syslog(LOG_ERR,"Too many errors, closing connection");
-			break;
-		}
+    if ( errors ) {
+      errors--;
+    } else {
+      syslog(LOG_ERR,"Too many errors, closing connection");
+      break;
+    }
   } while ( 1 );
   close(fp);
   close(rrq_socket);
@@ -176,6 +181,7 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
   int fp;
   int opcode, packet_block, last_block;
   char packet_buff[TFTP_BUF_SIZE];
+  char filename[TFTP_BUF_SIZE];
   int bytes, rv, diff;
   char client_name[256];
   int errors = 5;	// allow no more than 5 errors per trasnfer.
@@ -188,7 +194,12 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
   }
 
   inet_ntop(address->ss_family,get_in_addr((struct sockaddr *)address),client_name, sizeof (client_name));
-  syslog(LOG_ERR,"WRQ: %s, %s", client_name, data+2);
+  strncpy(filename, data+2, TFTP_BUF_SIZE);
+  if ( strstr(filename, "..") == 0) {
+    syslog(LOG_ERR,"WRQ: %s, invalid filename %s", client_name, filename);
+    return -1;
+  }
+  syslog(LOG_ERR,"WRQ: %s, %s", client_name, filename);
   mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
   fp = open(data+2, O_WRONLY | O_CREAT, mode );
   if ( fp >= 0 ) {
@@ -275,6 +286,12 @@ int main( int argc, char *argv[] )
   syslog(LOG_ERR,"TFTP_Server online");
 
   // ------------------------------------
+	if ( daemon( 1, 0 ) < 0 ) { // keep dir
+		syslog(LOG_ERR,"daemonise failed");
+		return -1;
+	}
+
+	// ------------------------------------
   // set up UDP listner.
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC; // set to AF_INET to force IPv4
@@ -303,9 +320,6 @@ int main( int argc, char *argv[] )
     return 2;
   }
   freeaddrinfo(servinfo);
-
-  // ------------------------------------
-  // set up signal handlers.
 
   // ------------------------------------
   // Main Loop.
@@ -337,7 +351,7 @@ int main( int argc, char *argv[] )
             return TFTP_NewReadRequest(packet_buff, &their_addr);
 
           } else if ( pid < 0 ) {
-						syslog(LOG_ERR,"RRQ: Fork error");
+            syslog(LOG_ERR,"RRQ: Fork error");
             return -1;
           }
         } else if ( opcode == TFTP_WRQ ) {
@@ -346,7 +360,7 @@ int main( int argc, char *argv[] )
             return TFTP_NewWriteRequest(packet_buff, &their_addr);
 
           } else if ( pid < 0 ) {
-						syslog(LOG_ERR,"WRQ: Fork error");
+            syslog(LOG_ERR,"WRQ: Fork error");
             return -1;
           }
         }
