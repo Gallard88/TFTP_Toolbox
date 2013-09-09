@@ -34,6 +34,8 @@
 
 // *******************************************************************************************
 const char Default_Dir[] = "/srv/";
+char SystemDir[TFTP_BUF_SIZE*2];
+
 // *******************************************************************************************
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
@@ -80,7 +82,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
     syslog(LOG_ERR,"RRQ: %s, invalid filename %s", client_name, data+2);
     return -1;
   }
-  strcpy(filename, Default_Dir);
+  strcpy(filename, SystemDir);
   strcat(filename, data+2 );
 
   syslog(LOG_ERR,"RRQ: %s, %s", client_name, data+2);
@@ -206,7 +208,7 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
     syslog(LOG_ERR,"WRQ: %s, invalid filename %s", client_name, data+2);
     return -1;
   }
-  strcpy(filename, Default_Dir);
+  strcpy(filename, SystemDir);
   strcat(filename, data+2 );
   syslog(LOG_ERR,"WRQ: %s, %s", client_name, data+2);
   mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
@@ -298,12 +300,23 @@ int main( int argc, char *argv[] )
   syslog(LOG_ERR,"TFTP_Server online");
 
   // ------------------------------------
+/*
   if ( daemon( 1, 0 ) < 0 ) { // keep dir
     syslog(LOG_ERR,"daemonise failed");
     return -1;
   }
-
+*/
   // ------------------------------------
+  if ( argc == 2 ) {
+		strncpy(SystemDir, argv[1], sizeof(SystemDir) - TFTP_BUF_SIZE);
+		if ( SystemDir[strlen(SystemDir)-1] != '/') {
+			strcat(SystemDir, "/");
+		}
+	} else {
+		strcpy(SystemDir, Default_Dir);
+	}
+
+	// ------------------------------------
   // set up UDP listner.
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC; // set to AF_INET to force IPv4
