@@ -125,7 +125,6 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
         opcode = rec_buff[1];
         if ( opcode == TFTP_ACK ) {
           packet_block = (rec_buff[2] * 256) | rec_buff[3];
-          printf("Ack: %d\n", packet_length);
           if ( packet_length < TFTP_BUF_SIZE ) {
             diff = time(NULL) - start_time;
             if ( diff == 0 )
@@ -248,7 +247,6 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
         syslog(LOG_ERR,"Too many errors, closing connection");
         break;
       }
-      printf("Error: %d\n", errors);
       TFTP_SendAck(last_block, wrq_socket, address);
     }
   }
