@@ -88,7 +88,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
   syslog(LOG_ERR,"RRQ: %s, %s", client_name, data+2);
 
   if ((rrq_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP)) == -1) {
-    syslog(LOG_ERR,"WRQ: listner: socket");
+    syslog(LOG_ERR,"RRQ: listner: socket");
     return -1;
   }
 
@@ -112,7 +112,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
       send_buff[3] = (last_block % 256);
       packet_length = read(fp, send_buff+4, TFTP_DATA_SIZE);
       if ( packet_length < 0 ) {
-        syslog(LOG_ERR,"Read error: %d", rv );
+        syslog(LOG_ERR,"RRQ: Read error: %d", rv );
         break;
       }
       packet_length += 4;
@@ -121,7 +121,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
 
     rv = sendto(rrq_socket, send_buff, packet_length, 0, (const struct sockaddr *) address, sizeof(struct sockaddr));
     if ( rv < 0 ) {
-      syslog(LOG_ERR,"sendto: %d", rv );
+      syslog(LOG_ERR,"RRQ: sendto: %d", rv );
       break;
     }
 
@@ -143,12 +143,12 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
             diff = time(NULL) - start_time;
             if ( diff == 0 )
               diff = 1;
-            syslog(LOG_ERR,"Transfer from %s complete, %d bytes in %d seconds", client_name, (last_block*512)+(packet_length-4), diff);
+            syslog(LOG_ERR,"RRQ: Transfer from %s complete, %d bytes in %d seconds", client_name, (last_block*512)+(packet_length-4), diff);
             break;
           }
           continue;
         } else if ( opcode == TFTP_ERROR ) {
-          syslog(LOG_ERR,"Some sort of error :(");
+          syslog(LOG_ERR,"RRQ: Error %d: %s", rec_buff[3], rec_buff+4);
           break;
         }
       }
@@ -156,7 +156,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
     if ( errors ) {
       errors--;
     } else {
-      syslog(LOG_ERR,"Too many errors, closing connection");
+      syslog(LOG_ERR,"RRQ: Too many errors, closing connection");
       break;
     }
   } while ( 1 );
@@ -236,7 +236,7 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
         addr_len = sizeof(struct sockaddr);
         bytes = recvfrom(wrq_socket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
         if ( bytes <= 0 ) {
-          syslog(LOG_ERR,"recvfrom: %d", bytes);
+          syslog(LOG_ERR,"WRQ: recvfrom: %d", bytes);
           break;
         }
         opcode = packet_buff[1];
@@ -251,7 +251,7 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
               diff = time(NULL) - start_time;
               if ( diff == 0 )
                 diff = 1;
-              syslog(LOG_ERR,"Transfer from %s complete, %d bytes in %d seconds", client_name, (last_block*512)+(bytes-2), diff);
+              syslog(LOG_ERR,"WRQ: Transfer from %s complete, %d bytes in %d seconds", client_name, (last_block*512)+(bytes-2), diff);
               TFTP_SendAck(last_block, wrq_socket, address);
               break;
             }
@@ -263,14 +263,14 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
           break;
         }
       } else {
-        syslog(LOG_ERR,"Timeout: Block %d", last_block);
+        syslog(LOG_ERR,"WRQ: Timeout: Block %d", last_block);
         TFTP_SendAck(last_block, wrq_socket, address);
       }
     }
     if ( errors ) {
       errors--;
     } else {
-      syslog(LOG_ERR,"Too many errors, closing connection");
+      syslog(LOG_ERR,"WRQ: Too many errors, closing connection");
       break;
     }
     TFTP_SendAck(last_block, wrq_socket, address);
