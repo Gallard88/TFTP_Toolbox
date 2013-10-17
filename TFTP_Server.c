@@ -33,7 +33,7 @@
 #define ACT_TIMEOUT		2
 
 // *******************************************************************************************
-const char Default_Dir[] = "/srv/";
+const char Default_Dir[] = "/tmp/";
 char SystemDir[TFTP_BUF_SIZE*2];
 
 // *******************************************************************************************
@@ -314,6 +314,7 @@ int main( int argc, char *argv[] )
   } else {
     strcpy(SystemDir, Default_Dir);
   }
+  syslog(LOG_ERR,"Directory set: %s", SystemDir);
 
   // ------------------------------------
   // set up UDP listner.
