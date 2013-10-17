@@ -61,6 +61,55 @@ void TFTP_SendData(int block_number, int sock, char *data, int length, struct so
 }
 
 // *******************************************************************************************
+void TFTP_Send_Error(int sock, int error_type, struct sockaddr_storage *address)
+{
+  char buf[TFTP_BUF_SIZE];
+  
+  buf[0] = 0;
+  buf[1] = TFTP_DATA;
+  buf[2] = 0;
+  buf[3] = error_type;
+  switch ( error_type ) {
+    case 0 :
+      strncpy(buf+4, "Not defined", TFTP_BUF_SIZE-4);
+      break;
+      
+    case 1:
+      strncpy(buf+4, "File not found", TFTP_BUF_SIZE-4);
+      break;
+      
+    case 2:
+      strncpy(buf+4, "Access violation", TFTP_BUF_SIZE-4);
+      break;
+      
+    case 3:
+      strncpy(buf+4, "Disk full or allocation exceeded", TFTP_BUF_SIZE-4);
+      break;
+      
+    case 4:
+      strncpy(buf+4, "Illegal TFTP operation", TFTP_BUF_SIZE-4);
+      break;
+      
+    case 5:
+      strncpy(buf+4, "Unknown transfer ID", TFTP_BUF_SIZE-4);
+      break;
+      
+    case 6:
+      strncpy(buf+4, "File already exists", TFTP_BUF_SIZE-4);
+      break;
+      
+    case 7:
+      strncpy(buf+4, "No such user", TFTP_BUF_SIZE-4);
+      break;
+      
+    default:
+      return;
+      
+  }
+  sendto(sock, buf, strlen(buf+4)+5, 0, (const struct sockaddr *) address, sizeof(struct sockaddr));
+}
+
+// *******************************************************************************************
 int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
 {
   fd_set readFD;
@@ -72,35 +121,35 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
   char filename[TFTP_BUF_SIZE*2];
   int rrq_socket;
   int fp;
-  int opcode, packet_block, last_block;
-  int packet_length, rv, diff;
+  int opcode, packet_block = 0, last_block = 1;
+  int packet_length = 0, rv, diff;
   char client_name[256];
   int errors = 5;	// allow no more than 5 errors per trasnfer.
-
-  inet_ntop(address->ss_family,get_in_addr((struct sockaddr *)address),client_name, sizeof (client_name));
-  if ( strstr(data+2, "..") != NULL ) {
-    syslog(LOG_ERR,"RRQ: %s, invalid filename %s", client_name, data+2);
-    return -1;
-  }
-  strcpy(filename, SystemDir);
-  strcat(filename, data+2 );
-
-  syslog(LOG_ERR,"RRQ: %s, %s", client_name, data+2);
 
   if ((rrq_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP)) == -1) {
     syslog(LOG_ERR,"RRQ: listner: socket");
     return -1;
   }
 
-  fp = open(filename, O_RDONLY );
-  if ( fp < 0 ) {
-    syslog(LOG_ERR,"RRQ: file doesn't exist");
+  inet_ntop(address->ss_family,get_in_addr((struct sockaddr *)address),client_name, sizeof (client_name));
+  if ( strstr(data+2, "..") != NULL ) {
+    syslog(LOG_ERR,"RRQ: %s, invalid filename %s", client_name, data+2);
+    TFTP_Send_Error(rrq_socket, 2, address);
     return -1;
   }
+  
+  strcpy(filename, SystemDir);
+  strcat(filename, data+2 );
 
-  last_block = 1;
-  packet_block = 0;
-  packet_length = 0;
+  fp = open(filename, O_RDONLY );
+  if ( fp < 0 ) {
+    syslog(LOG_ERR,"RRQ: file doesn't exist");    
+    TFTP_Send_Error(rrq_socket, 1, address);
+    return -1;
+  } else {
+    syslog(LOG_ERR,"RRQ: %s, %s", client_name, data+2);
+  }
+
   start_time = time(NULL);
 
   do {
@@ -188,7 +237,7 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
   mode_t mode;
   int wrq_socket;
   int fp;
-  int opcode, packet_block, last_block;
+  int opcode, packet_block, last_block = 0;
   char packet_buff[TFTP_BUF_SIZE];
   char filename[TFTP_BUF_SIZE*2];
   int bytes, rv, diff;
@@ -206,6 +255,7 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
 
   if ( strstr(data+2, "..") != NULL ) {
     syslog(LOG_ERR,"WRQ: %s, invalid filename %s", client_name, data+2);
+    TFTP_Send_Error(wrq_socket, 2, address);
     return -1;
   }
   strcpy(filename, SystemDir);
@@ -215,11 +265,10 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
   fp = open(filename, O_WRONLY | O_CREAT, mode );
   if ( fp < 0 ) {
     syslog(LOG_ERR,"WRQ: failed to open file for writing");
+    TFTP_Send_Error(wrq_socket, 3, address);
     return -1;
   }
 
-
-  last_block = 0;
   start_time = time(NULL);
   TFTP_SendAck(last_block, wrq_socket, address);
 
