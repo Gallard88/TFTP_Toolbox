@@ -47,64 +47,50 @@ void *get_in_addr(struct sockaddr *sa)
 }
 
 // *******************************************************************************************
-void TFTP_SendData(int block_number, int sock, char *data, int length, struct sockaddr_storage *address)
-{
-  char buf[TFTP_BUF_SIZE];
-
-  buf[0] = 0;
-  buf[1] = TFTP_DATA;
-  buf[2] = (block_number / 256);
-  buf[3] = (block_number % 256);
-  memcpy(buf +4, data, length);
-  sendto(sock, buf, length+4, 0, (const struct sockaddr *) address, sizeof(struct sockaddr));
-
-}
-
-// *******************************************************************************************
 void TFTP_Send_Error(int sock, int error_type, struct sockaddr_storage *address)
 {
   char buf[TFTP_BUF_SIZE];
-  
+
   buf[0] = 0;
   buf[1] = TFTP_DATA;
   buf[2] = 0;
   buf[3] = error_type;
   switch ( error_type ) {
-    case 0 :
-      strncpy(buf+4, "Not defined", TFTP_BUF_SIZE-4);
-      break;
-      
-    case 1:
-      strncpy(buf+4, "File not found", TFTP_BUF_SIZE-4);
-      break;
-      
-    case 2:
-      strncpy(buf+4, "Access violation", TFTP_BUF_SIZE-4);
-      break;
-      
-    case 3:
-      strncpy(buf+4, "Disk full or allocation exceeded", TFTP_BUF_SIZE-4);
-      break;
-      
-    case 4:
-      strncpy(buf+4, "Illegal TFTP operation", TFTP_BUF_SIZE-4);
-      break;
-      
-    case 5:
-      strncpy(buf+4, "Unknown transfer ID", TFTP_BUF_SIZE-4);
-      break;
-      
-    case 6:
-      strncpy(buf+4, "File already exists", TFTP_BUF_SIZE-4);
-      break;
-      
-    case 7:
-      strncpy(buf+4, "No such user", TFTP_BUF_SIZE-4);
-      break;
-      
-    default:
-      return;
-      
+  case 0 :
+    strncpy(buf+4, "Not defined", TFTP_BUF_SIZE-4);
+    break;
+
+  case 1:
+    strncpy(buf+4, "File not found", TFTP_BUF_SIZE-4);
+    break;
+
+  case 2:
+    strncpy(buf+4, "Access violation", TFTP_BUF_SIZE-4);
+    break;
+
+  case 3:
+    strncpy(buf+4, "Disk full or allocation exceeded", TFTP_BUF_SIZE-4);
+    break;
+
+  case 4:
+    strncpy(buf+4, "Illegal TFTP operation", TFTP_BUF_SIZE-4);
+    break;
+
+  case 5:
+    strncpy(buf+4, "Unknown transfer ID", TFTP_BUF_SIZE-4);
+    break;
+
+  case 6:
+    strncpy(buf+4, "File already exists", TFTP_BUF_SIZE-4);
+    break;
+
+  case 7:
+    strncpy(buf+4, "No such user", TFTP_BUF_SIZE-4);
+    break;
+
+  default:
+    return;
+
   }
   sendto(sock, buf, strlen(buf+4)+5, 0, (const struct sockaddr *) address, sizeof(struct sockaddr));
 }
@@ -137,13 +123,13 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
     TFTP_Send_Error(rrq_socket, 2, address);
     return -1;
   }
-  
+
   strcpy(filename, SystemDir);
   strcat(filename, data+2 );
 
   fp = open(filename, O_RDONLY );
   if ( fp < 0 ) {
-    syslog(LOG_ERR,"RRQ: file doesn't exist");    
+    syslog(LOG_ERR,"RRQ: file doesn't exist");
     TFTP_Send_Error(rrq_socket, 1, address);
     return -1;
   } else {
