@@ -259,7 +259,7 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
             continue;
           }
         } else if ( opcode == TFTP_ERROR ) {
-          syslog(LOG_ERR,"Some sort of error :(");
+          syslog(LOG_ERR,"WRQ: Error %d: %s", packet_buff[3], packet_buff+4);
           break;
         }
       } else {
