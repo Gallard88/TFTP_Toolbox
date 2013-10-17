@@ -307,15 +307,15 @@ int main( int argc, char *argv[] )
 
   // ------------------------------------
   if ( argc == 2 ) {
-		strncpy(SystemDir, argv[1], sizeof(SystemDir) - TFTP_BUF_SIZE);
-		if ( SystemDir[strlen(SystemDir)-1] != '/') {
-			strcat(SystemDir, "/");
-		}
-	} else {
-		strcpy(SystemDir, Default_Dir);
-	}
+    strncpy(SystemDir, argv[1], sizeof(SystemDir) - TFTP_BUF_SIZE);
+    if ( SystemDir[strlen(SystemDir)-1] != '/') {
+      strcat(SystemDir, "/");
+    }
+  } else {
+    strcpy(SystemDir, Default_Dir);
+  }
 
-	// ------------------------------------
+  // ------------------------------------
   // set up UDP listner.
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC; // set to AF_INET to force IPv4
