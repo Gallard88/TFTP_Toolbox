@@ -21,10 +21,14 @@ style: *.c
 install: TFTP_Server TFTP_Client 
 	install TFTP_Server /usr/local/bin
 	install TFTP_Client /usr/local/bin
+	install TFTP_Server.sh /etc/init.d
+	update-rc.d TFTP_Server.sh defaults 98 02
 	
 uninstall: TFTP_Server TFTP_Client 
+	update-rc.d -f TFTP_Server.sh remove
 	rm /usr/local/bin/TFTP_Server 
 	rm /usr/local/bin/TFTP_Client 
+	rm /etc/init.d/TFTP_Server.sh
 
 clean:
 	rm -rf *o *~ TFTP_Server TFTP_Client
