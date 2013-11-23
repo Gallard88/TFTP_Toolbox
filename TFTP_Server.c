@@ -147,7 +147,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
       send_buff[3] = (last_block % 256);
       packet_length = read(fp, send_buff+4, TFTP_DATA_SIZE);
       if ( packet_length < 0 ) {
-        syslog(LOG_ERR,"RRQ: Read error: %d", rv );
+        syslog(LOG_ERR,"RRQ: Read error: %d", packet_length );
         break;
       }
       packet_length += 4;
