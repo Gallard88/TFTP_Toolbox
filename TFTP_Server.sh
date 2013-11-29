@@ -9,11 +9,13 @@
 
 start() {
   # Start TFTP Server
+  echo "Tftp_Server: Start"
   /usr/local/bin/TFTP_Server /opt/
 }
 
 stop() {
   # Stop TFTP_Server
+  echo "Tftp_Server: Stop"
   pkill TFTP_Server
 }
 
