@@ -30,7 +30,7 @@
 #define TFTP_ACK		4
 #define TFTP_ERROR		5
 
-#define ACT_TIMEOUT		2
+#define ACT_TIMEOUT		5
 
 // *******************************************************************************************
 const char Default_Dir[] = "/tmp/";
