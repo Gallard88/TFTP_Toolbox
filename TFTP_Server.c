@@ -96,6 +96,17 @@ void TFTP_Send_Error(int sock, int error_type, struct sockaddr_storage *address)
 }
 
 // *******************************************************************************************
+static void Correct_Path(char *path)
+{// if it sees a windows style path name, correct it and turn it into a unix style.
+  while ( *path != 0 ) {
+    if ( *path == '\\') {
+      *path = '/';
+    }
+    path++;
+  }
+}
+
+// *******************************************************************************************
 int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
 {
   fd_set readFD;
@@ -126,6 +137,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
 
   strcpy(filename, SystemDir);
   strcat(filename, data+2 );
+  Correct_Path(filename);
 
   fp = open(filename, O_RDONLY );
   if ( fp < 0 ) {
@@ -246,6 +258,8 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
   }
   strcpy(filename, SystemDir);
   strcat(filename, data+2 );
+  Correct_Path(filename);
+
   syslog(LOG_ERR,"WRQ: %s, %s", client_name, data+2);
   mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
   fp = open(filename, O_WRONLY | O_CREAT, mode );
