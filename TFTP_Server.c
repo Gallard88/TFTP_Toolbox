@@ -31,11 +31,13 @@
 #include <sys/types.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <time.h>
 #include <fcntl.h>
+#include <signal.h>
 
 // *******************************************************************************************
 // *******************************************************************************************
@@ -55,8 +57,19 @@
 // *******************************************************************************************
 const char Default_Dir[] = "/tmp/";
 char SystemDir[TFTP_BUF_SIZE*2];
+sig_atomic_t child_exit_status;
 
 // *******************************************************************************************
+void clean_up_child_process (int signal_number)
+{
+  // Clean up the child process.
+  int status;
+  wait (&status);
+  // Store its exit status in a global variable.
+  child_exit_status = status;
+}
+
+ // *******************************************************************************************
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
 {
@@ -359,10 +372,17 @@ int main( int argc, char *argv[] )
   struct sockaddr_storage their_addr;
   socklen_t addr_len;
   fd_set ReadFD;
+  struct sigaction sigchld_action;
   char packet_buff[TFTP_BUF_SIZE];
   int bytes, rv;
   int opcode;
   pid_t pid;
+
+  // ------------------------------------
+  // Handle SIGCHLD by calling clean_up_child_process.
+  memset (&sigchld_action, 0, sizeof (sigchld_action));
+  sigchld_action.sa_handler = &clean_up_child_process;
+  sigaction (SIGCHLD, &sigchld_action, NULL);
 
   // ------------------------------------
   // Set up Syslog.
