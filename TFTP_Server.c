@@ -41,6 +41,8 @@
 #include <signal.h>
 
 // *******************************************************************************************
+typedef int (*TFTP_Handle)(char *data, struct sockaddr_storage *address);
+
 // *******************************************************************************************
 
 #define TFTP_BUF_SIZE	(512+2+2)
@@ -409,13 +411,10 @@ int main( int argc, char *argv[] )
   struct addrinfo hints, *servinfo, *p;
   struct timeval timeout;
   struct sockaddr_storage their_addr;
-  socklen_t addr_len;
   fd_set ReadFD;
   struct sigaction sigchld_action;
   char packet_buff[TFTP_BUF_SIZE];
-  int bytes, rv;
-  int opcode;
-  pid_t pid;
+  int rv;
   const char *dir;
 
   // ------------------------------------
@@ -450,7 +449,7 @@ int main( int argc, char *argv[] )
       strcat(SystemDir, "/");
     }
   }
-  syslog(LOG_ERR,"Directory set: %s", SystemDir);
+  syslog(LOG_NOTICE,"Directory set: %s", SystemDir);
 
   // ------------------------------------
   // set up UDP listner.
@@ -495,38 +494,41 @@ int main( int argc, char *argv[] )
     if ( select(ListenSocket+1, &ReadFD, NULL, NULL, &timeout) > 0 ) {
       if ( FD_ISSET(ListenSocket, &ReadFD) ) {
         // read out packet.
-        addr_len = sizeof(struct sockaddr);
-        bytes = recvfrom(ListenSocket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
+        socklen_t addr_len = sizeof(struct sockaddr);
+        int bytes = recvfrom(ListenSocket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
         if ( bytes < 0) {
           // error, close the program
           syslog(LOG_ERR,"recvfrom: %d", bytes);
           exit(1);
-        }
-        if ( bytes == 0 ) {
+        } else if ( bytes == 0 ) {
           continue;
         }
 
-        opcode = packet_buff[1];
+        int opcode = packet_buff[1];
 
         // if we have a valid request, we fork ourselves.
         // The child then handles that transfer, before exiting,
         // The parent process goes back to listening for the next connection.
+        TFTP_Handle funcPtr;
+
+        // here we choose what function to run based on the opcode of the recieved packet.
         if ( opcode == TFTP_RRQ ) {
-          pid = fork();
+          funcPtr = &TFTP_NewReadRequest;
+        } else if ( opcode == TFTP_WRQ ){
+          funcPtr = &TFTP_NewWriteRequest;
+        } else {
+          funcPtr = NULL;
+        }
+
+        // fork a child,
+        // the child then handles the transaction.
+        if ( funcPtr != NULL ) {
+          pid_t pid = fork();
           if ( pid == 0 ) { // child
-            return TFTP_NewReadRequest(packet_buff, &their_addr);
+            return funcPtr(packet_buff, &their_addr);
 
           } else if ( pid < 0 ) {
-            syslog(LOG_ERR,"RRQ: Fork error");
-            return -1;
-          }
-        } else if ( opcode == TFTP_WRQ ) {
-          pid = fork();
-          if ( pid == 0 ) { // child
-            return TFTP_NewWriteRequest(packet_buff, &their_addr);
-
-          } else if ( pid < 0 ) {
-            syslog(LOG_ERR,"WRQ: Fork error");
+            syslog(LOG_ERR,"Fork error");
             return -1;
           }
         }
