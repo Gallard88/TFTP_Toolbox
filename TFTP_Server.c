@@ -21,6 +21,7 @@
  THE SOFTWARE.
 */
 // *******************************************************************************************
+#define _GNU_SOURCE
 
 #include <stdio.h>
 #include <syslog.h>
@@ -55,8 +56,8 @@
 #define ACT_TIMEOUT		5
 
 // *******************************************************************************************
-const char Default_Dir[] = "/tmp/";
-char SystemDir[TFTP_BUF_SIZE*2];
+const char DefaultDir[] = "/tmp/";
+char *SystemDir;
 sig_atomic_t child_exit_status;
 
 // *******************************************************************************************
@@ -69,7 +70,7 @@ void clean_up_child_process (int signal_number)
   child_exit_status = status;
 }
 
- // *******************************************************************************************
+// *******************************************************************************************
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
 {
@@ -149,7 +150,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
   socklen_t addr_len;
   time_t start_time;
   char rec_buff[TFTP_ACK_SIZE], send_buff[TFTP_BUF_SIZE];
-  char filename[TFTP_BUF_SIZE*2];
+  char *filename;
   int rrq_socket;
   int fp;
   int opcode, packet_block = 0, last_block = 1;
@@ -170,9 +171,15 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
     return -1;
   }
 
-  strcpy(filename, SystemDir);
-  strcat(filename, data+2 );
-  Correct_Path(filename);
+  rv = asprintf(&filename, "%s%s", SystemDir, data+2);
+  if (( rv < 0 ) || ( filename == NULL )) {
+    syslog(LOG_NOTICE, "RRQ: Filename == NULL");
+    return -1;
+  } else {
+//  strcpy(filename, SystemDir);
+//  strcat(filename, data+2 );
+    Correct_Path(filename);
+  }
 
   fp = open(filename, O_RDONLY );
   if ( fp < 0 ) {
@@ -243,6 +250,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
       break;
     }
   } while ( 1 );
+  free(filename);
   close(fp);
   close(rrq_socket);
   return 0;
@@ -273,7 +281,7 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
   int fp;
   int opcode, packet_block, last_block = 0;
   char packet_buff[TFTP_BUF_SIZE];
-  char filename[TFTP_BUF_SIZE*2];
+  char *filename;
   int bytes, rv, diff;
   char client_name[256];
   int errors = 5;	// allow no more than 5 errors per trasnfer.
@@ -293,9 +301,15 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
     TFTP_Send_Error(wrq_socket, 2, address);
     return -1;
   }
-  strcpy(filename, SystemDir);
-  strcat(filename, data+2 );
-  Correct_Path(filename);
+//  strcpy(filename, SystemDir);
+//  strcat(filename, data+2 );
+  rv = asprintf(&filename, "%s%s", SystemDir, data+2);
+  if (( rv < 0 ) || ( filename == NULL )) {
+    syslog(LOG_NOTICE, "WRQ: Filename == NULL");
+    return -1;
+  } else {
+    Correct_Path(filename);
+  }
 
   syslog(LOG_ERR,"WRQ: %s, %s", client_name, data+2);
   mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
@@ -361,6 +375,7 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
     }
     TFTP_SendAck(last_block, wrq_socket, address);
   }
+  free(filename);
   close(fp);
   close(wrq_socket);
   return 0;
@@ -394,6 +409,7 @@ int main( int argc, char *argv[] )
   int bytes, rv;
   int opcode;
   pid_t pid;
+  const char *dir;
 
   // ------------------------------------
   // Handle SIGCHLD by calling clean_up_child_process.
@@ -416,13 +432,24 @@ int main( int argc, char *argv[] )
   // ------------------------------------
   // here we define what directory we want to use.
   // if the user has supplied one, we use that, other wise we use the default.
-  if ( argc == 2 ) {
-    strncpy(SystemDir, argv[1], sizeof(SystemDir) - TFTP_BUF_SIZE);
-    if ( SystemDir[strlen(SystemDir)-1] != '/') {
+//  if ( argc == 2 ) {
+//    strncpy(SystemDir, argv[1], sizeof(SystemDir) - TFTP_BUF_SIZE);
+//    if ( SystemDir[strlen(SystemDir)-1] != '/') {
+//      strcat(SystemDir, "/");
+//    }
+//  } else {
+//    strcpy(SystemDir, Default_Dir);
+//  }
+
+  dir = ( argc >= 2 )? argv[1]: DefaultDir;
+  rv = asprintf(&SystemDir, "%s", dir);
+  if (( SystemDir == NULL ) || ( rv < 0 )) {
+    syslog(LOG_ERR, "SystemDir == NULL");
+    return -1;
+  } else {
+    if ( SystemDir[strlen(SystemDir)-1] != '/' ) {
       strcat(SystemDir, "/");
     }
-  } else {
-    strcpy(SystemDir, Default_Dir);
   }
   syslog(LOG_ERR,"Directory set: %s", SystemDir);
 
@@ -472,7 +499,7 @@ int main( int argc, char *argv[] )
         addr_len = sizeof(struct sockaddr);
         bytes = recvfrom(ListenSocket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
         if ( bytes < 0) {
-					// error, close the program
+          // error, close the program
           syslog(LOG_ERR,"recvfrom: %d", bytes);
           exit(1);
         }
@@ -482,7 +509,7 @@ int main( int argc, char *argv[] )
 
         opcode = packet_buff[1];
 
-				// if we have a valid request, we fork ourselves.
+        // if we have a valid request, we fork ourselves.
         // The child then handles that transfer, before exiting,
         // The parent process goes back to listening for the next connection.
         if ( opcode == TFTP_RRQ ) {
@@ -507,6 +534,7 @@ int main( int argc, char *argv[] )
       }
     }
   }
+  free(SystemDir);
   close(ListenSocket);
   return 0;
 }

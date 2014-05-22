@@ -1,6 +1,6 @@
 all: TFTP_Server
 
-FLAGS=-Wall -O2
+FLAGS=-Wall -O2 -std=c99
 
 TFTP_Server: TFTP_Server.o
 	gcc $(FLAGS) TFTP_Server.o -o TFTP_Server
