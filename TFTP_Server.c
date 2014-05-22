@@ -1,5 +1,5 @@
 /*
- TFTP Server ( http://www.github.com/Gallard88/TFTP_Toolbox )
+ TFTP Server
  Copyright (c) 2013 Thomas BURNS
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -157,6 +157,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
   char client_name[256];
   int errors = 5;	// allow no more than 5 errors per trasnfer.
 
+  // now we create a new socket, to connect to the client via the port it sent the first packet from.
   if ((rrq_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP)) == -1) {
     syslog(LOG_ERR,"RRQ: listner: socket");
     return -1;
@@ -211,6 +212,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
     timeout.tv_sec = ACT_TIMEOUT;
     timeout.tv_usec = 0;
 
+    // listen for data, but with a time out so we can detect problems
     if ( select(rrq_socket+1, &readFD, NULL, NULL, &timeout) > 0 ) {
 
       if ( FD_ISSET(rrq_socket, &readFD) ) {
@@ -278,6 +280,7 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
 
   // ------------------------------------
   // set up UDP listner.
+  // start a new socket, to connect to the client via the port on which the first packet was received.
   if ((wrq_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP)) == -1) {
     syslog(LOG_ERR,"WRQ: listner: socket");
     return -1;
@@ -311,7 +314,7 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
     FD_SET(wrq_socket, &readFD);
     timeout.tv_sec = ACT_TIMEOUT;
     timeout.tv_usec = 0;
-
+    // listen on socket, but with a time out so we can detect problems.
     if ( select(wrq_socket+1, &readFD, NULL, NULL, &timeout) > 0 ) {
       if ( FD_ISSET(wrq_socket, &readFD) ) {
 
@@ -364,6 +367,20 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
 }
 
 // *******************************************************************************************
+/**
+ *	TFTP is a curious protocol.
+ *  The inital connection is made on port 69 via UDP.
+ *  The server response with a packet sent back to client:port,
+ *  BUT the packet is sent from a different port on the server
+ *  The entire transfer then takes place between these two ports
+ *  Leaving port 69 exclusively to listen for new incoming connections.
+ *
+ *  This server starts up, and begins listening on port 69.
+ *  When a connection is established, it forks a child and that child handles
+ *  the transfer. once the transfer is complete/terminated, the child returns
+ *  ending the process.
+ */
+
 int main( int argc, char *argv[] )
 {
   int ListenSocket;
@@ -387,15 +404,18 @@ int main( int argc, char *argv[] )
   // ------------------------------------
   // Set up Syslog.
   openlog("TFTP_Server", LOG_PID, LOG_USER);
-  syslog(LOG_ERR,"TFTP_Server online");
+  syslog(LOG_NOTICE,"TFTP_Server online");
 
   // ------------------------------------
+  // Daemonise the program.
   if ( daemon( 1, 0 ) < 0 ) { // keep dir
     syslog(LOG_ERR,"daemonise failed");
     return -1;
   }
 
   // ------------------------------------
+  // here we define what directory we want to use.
+  // if the user has supplied one, we use that, other wise we use the default.
   if ( argc == 2 ) {
     strncpy(SystemDir, argv[1], sizeof(SystemDir) - TFTP_BUF_SIZE);
     if ( SystemDir[strlen(SystemDir)-1] != '/') {
@@ -409,14 +429,15 @@ int main( int argc, char *argv[] )
   // ------------------------------------
   // set up UDP listner.
   memset(&hints, 0, sizeof hints);
-  hints.ai_family = AF_UNSPEC; // set to AF_INET to force IPv4
-  hints.ai_socktype = SOCK_DGRAM;
+  hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
+  hints.ai_socktype = SOCK_DGRAM; // UDP
   hints.ai_flags = AI_PASSIVE; // use my IP
 
   if ((rv = getaddrinfo(NULL, MYPORT, &hints, &servinfo)) != 0) {
     syslog(LOG_ERR,"getaddrinfo: %s\n", gai_strerror(rv));
     return 1;
   }
+
   // loop through all the results and bind to the first we can
   for(p = servinfo; p != NULL; p = p->ai_next) {
     if ((ListenSocket = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
@@ -451,6 +472,7 @@ int main( int argc, char *argv[] )
         addr_len = sizeof(struct sockaddr);
         bytes = recvfrom(ListenSocket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
         if ( bytes < 0) {
+					// error, close the program
           syslog(LOG_ERR,"recvfrom: %d", bytes);
           exit(1);
         }
@@ -460,6 +482,9 @@ int main( int argc, char *argv[] )
 
         opcode = packet_buff[1];
 
+				// if we have a valid request, we fork ourselves.
+        // The child then handles that transfer, before exiting,
+        // The parent process goes back to listening for the next connection.
         if ( opcode == TFTP_RRQ ) {
           pid = fork();
           if ( pid == 0 ) { // child
