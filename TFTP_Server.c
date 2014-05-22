@@ -71,6 +71,54 @@ void clean_up_child_process (int signal_number)
 }
 
 // *******************************************************************************************
+static void Correct_Path(char *path)
+{
+  // if it sees a windows style path name, correct it and turn it into a unix style.
+  while ( *path != 0 ) {
+    if ( *path == '\\') {
+      *path = '/';
+    }
+    path++;
+  }
+}
+
+// *******************************************************************************************
+static int VerifyFilename(const char *name)
+{
+  if ( strstr(name, "..") != NULL ) {
+    return -1;
+  }
+  return 0;
+}
+
+// *******************************************************************************************
+static int OpenFile(const char *name, int write)
+{
+  char *filename;
+  int fp;
+
+  int rv = asprintf(&filename, "%s%s", SystemDir, name);
+  if (( rv < 0 ) || ( filename == NULL )) {
+    syslog(LOG_NOTICE, "Filename == NULL");
+    return -1;
+  } else {
+    Correct_Path(filename);
+  }
+
+  if ( write != 0 ) {
+    mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
+    fp = open(filename, O_WRONLY | O_CREAT, mode );
+  } else {
+    fp = open(filename, O_RDONLY );
+  }
+  if ( fp < 0 ) {
+    syslog(LOG_ERR,"File %s doesn't exist", name);
+  }
+  free(filename);
+  return fp;
+}
+
+// *******************************************************************************************
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
 {
@@ -130,18 +178,6 @@ void TFTP_Send_Error(int sock, int error_type, struct sockaddr_storage *address)
 }
 
 // *******************************************************************************************
-static void Correct_Path(char *path)
-{
-  // if it sees a windows style path name, correct it and turn it into a unix style.
-  while ( *path != 0 ) {
-    if ( *path == '\\') {
-      *path = '/';
-    }
-    path++;
-  }
-}
-
-// *******************************************************************************************
 int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
 {
   fd_set readFD;
@@ -150,9 +186,7 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
   socklen_t addr_len;
   time_t start_time;
   char rec_buff[TFTP_ACK_SIZE], send_buff[TFTP_BUF_SIZE];
-  char *filename;
   int rrq_socket;
-  int fp;
   int opcode, packet_block = 0, last_block = 1;
   int packet_length = 0, rv, diff;
   char client_name[256];
@@ -165,29 +199,19 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
   }
 
   inet_ntop(address->ss_family,get_in_addr((struct sockaddr *)address),client_name, sizeof (client_name));
-  if ( strstr(data+2, "..") != NULL ) {
+
+  if ( VerifyFilename((const char *)data+2) < 0 ) {
     syslog(LOG_ERR,"RRQ: %s, invalid filename %s", client_name, data+2);
     TFTP_Send_Error(rrq_socket, 2, address);
     return -1;
   }
 
-  rv = asprintf(&filename, "%s%s", SystemDir, data+2);
-  if (( rv < 0 ) || ( filename == NULL )) {
-    syslog(LOG_NOTICE, "RRQ: Filename == NULL");
-    return -1;
-  } else {
-//  strcpy(filename, SystemDir);
-//  strcat(filename, data+2 );
-    Correct_Path(filename);
-  }
-
-  fp = open(filename, O_RDONLY );
+  int fp = OpenFile((const char *) data+2, 0);
   if ( fp < 0 ) {
-    syslog(LOG_ERR,"RRQ: file doesn't exist");
     TFTP_Send_Error(rrq_socket, 1, address);
     return -1;
   } else {
-    syslog(LOG_ERR,"RRQ: %s, %s", client_name, data+2);
+    syslog(LOG_NOTICE,"RRQ: %s, %s", client_name, data+2);
   }
 
   start_time = time(NULL);
@@ -250,7 +274,6 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
       break;
     }
   } while ( 1 );
-  free(filename);
   close(fp);
   close(rrq_socket);
   return 0;
@@ -276,12 +299,9 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
   struct sockaddr_storage their_addr;
   socklen_t addr_len;
   time_t start_time;
-  mode_t mode;
   int wrq_socket;
-  int fp;
   int opcode, packet_block, last_block = 0;
   char packet_buff[TFTP_BUF_SIZE];
-  char *filename;
   int bytes, rv, diff;
   char client_name[256];
   int errors = 5;	// allow no more than 5 errors per trasnfer.
@@ -293,31 +313,19 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
     syslog(LOG_ERR,"WRQ: listner: socket");
     return -1;
   }
-
   inet_ntop(address->ss_family,get_in_addr((struct sockaddr *)address),client_name, sizeof (client_name));
 
-  if ( strstr(data+2, "..") != NULL ) {
+  if ( VerifyFilename((const char *)data+2) < 0 ) {
     syslog(LOG_ERR,"WRQ: %s, invalid filename %s", client_name, data+2);
     TFTP_Send_Error(wrq_socket, 2, address);
-    return -1;
-  }
-//  strcpy(filename, SystemDir);
-//  strcat(filename, data+2 );
-  rv = asprintf(&filename, "%s%s", SystemDir, data+2);
-  if (( rv < 0 ) || ( filename == NULL )) {
-    syslog(LOG_NOTICE, "WRQ: Filename == NULL");
-    return -1;
-  } else {
-    Correct_Path(filename);
   }
 
-  syslog(LOG_ERR,"WRQ: %s, %s", client_name, data+2);
-  mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
-  fp = open(filename, O_WRONLY | O_CREAT, mode );
+  int fp = OpenFile((const char *) data+2, 1);
   if ( fp < 0 ) {
-    syslog(LOG_ERR,"WRQ: failed to open file for writing");
     TFTP_Send_Error(wrq_socket, 3, address);
     return -1;
+  } else {
+    syslog(LOG_NOTICE,"WRQ: %s, %s", client_name, data+2);
   }
 
   start_time = time(NULL);
@@ -375,7 +383,6 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
     }
     TFTP_SendAck(last_block, wrq_socket, address);
   }
-  free(filename);
   close(fp);
   close(wrq_socket);
   return 0;
@@ -432,14 +439,6 @@ int main( int argc, char *argv[] )
   // ------------------------------------
   // here we define what directory we want to use.
   // if the user has supplied one, we use that, other wise we use the default.
-//  if ( argc == 2 ) {
-//    strncpy(SystemDir, argv[1], sizeof(SystemDir) - TFTP_BUF_SIZE);
-//    if ( SystemDir[strlen(SystemDir)-1] != '/') {
-//      strcat(SystemDir, "/");
-//    }
-//  } else {
-//    strcpy(SystemDir, Default_Dir);
-//  }
 
   dir = ( argc >= 2 )? argv[1]: DefaultDir;
   rv = asprintf(&SystemDir, "%s", dir);
