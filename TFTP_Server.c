@@ -56,8 +56,7 @@
 #define ACT_TIMEOUT		5
 
 // *******************************************************************************************
-struct Transaction
-{
+struct Transaction {
   int socket;
   struct sockaddr_storage *address;
   char client_name[256];
@@ -65,8 +64,8 @@ struct Transaction
   int errors;
 
   int file;
-
-
+  time_t start_time;
+  int byte_count;
 };
 
 // *******************************************************************************************
@@ -93,17 +92,28 @@ int Trans_SetupSocket(struct Transaction *t, struct sockaddr_storage *address)
 }
 
 // *******************************************************************************************
+static void PrintTransactionTime(struct Transaction *t)
+{
+  int diff = time(NULL) - t->start_time;
+
+  if ( diff == 0 )
+    diff = 1;
+  syslog(LOG_ERR,"%s: Transfer complete, %d bytes in %d seconds", t->client_name, t->byte_count, diff);
+}
+
+// *******************************************************************************************
 static int RunErrorHandler(struct Transaction *t)
 {
-    if ( t->errors ) {
-      t->errors--;
-      syslog(LOG_ERR,"Errors encountered");
-      return 0;
-    } else {
-      syslog(LOG_ERR,"Too many errors, closing connection");
-      return -1;
-    }
+  if ( t->errors ) {
+    t->errors--;
+    syslog(LOG_ERR,"Errors encountered");
+    return 0;
+  } else {
+    syslog(LOG_ERR,"Too many errors, closing connection");
+    return -1;
+  }
 }
+
 // *******************************************************************************************
 void clean_up_child_process (int signal_number)
 {
@@ -163,8 +173,7 @@ static void *get_in_addr(struct sockaddr *sa)
 }
 
 // *******************************************************************************************
-const char *ErrorMsg[] =
-{
+const char *ErrorMsg[] = {
   "Not defined",
   "File not found",
   "Access violation",
@@ -193,12 +202,9 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
 {
   fd_set readFD;
   struct timeval timeout;
-  time_t start_time;
   char rec_buff[TFTP_ACK_SIZE], send_buff[TFTP_BUF_SIZE];
   uint16_t packet_block = 0, last_block = 1;
-  int packet_length = 0, rv, diff;
-
-  start_time = time(NULL);
+  int packet_length = 0;
 
   do {
     if ( last_block != packet_block ) {
@@ -212,11 +218,12 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
         syslog(LOG_ERR,"RRQ: Read error: %d", packet_length );
         break;
       }
+      trans->byte_count += packet_length;
       packet_length += 4;
       last_block++;
     }
 
-    rv = sendto(trans->socket, send_buff, packet_length, 0, (const struct sockaddr *) trans->address, sizeof(struct sockaddr));
+    int rv = sendto(trans->socket, send_buff, packet_length, 0, (const struct sockaddr *) trans->address, sizeof(struct sockaddr));
     if ( rv < 0 ) {
       syslog(LOG_ERR,"RRQ: sendto: %d", rv );
       break;
@@ -240,10 +247,7 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
         if ( opcode == TFTP_ACK ) {
           packet_block = (rec_buff[2] * 256) | rec_buff[3];
           if ( packet_length < TFTP_BUF_SIZE ) {
-            diff = time(NULL) - start_time;
-            if ( diff == 0 )
-              diff = 1;
-            syslog(LOG_ERR,"RRQ: Transfer from %s complete, %d bytes in %d seconds", trans->client_name, (last_block*512)+(packet_length-4), diff);
+            PrintTransactionTime(trans);
             break;
           }
           continue;
@@ -277,14 +281,10 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
 {
   fd_set readFD;
   struct timeval timeout;
-  time_t start_time;
   uint16_t packet_block, last_block = 0;
   char packet_buff[TFTP_BUF_SIZE];
-  int bytes, rv, diff;
 
-  start_time = time(NULL);
   TFTP_SendAck(trans, last_block);
-
   while ( 1 ) {
     FD_ZERO(&readFD);
     FD_SET(trans->socket, &readFD);
@@ -297,7 +297,7 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
         // read out packet.
         socklen_t addr_len = sizeof(struct sockaddr);
         struct sockaddr_storage their_addr;
-        bytes = recvfrom(trans->socket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
+        int bytes = recvfrom(trans->socket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
 
         if ( bytes <= 0 ) {
           syslog(LOG_ERR,"WRQ: recvfrom: %d", bytes);
@@ -307,19 +307,16 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
         if ( opcode == TFTP_DATA ) {
           packet_block = (packet_buff[2] * 256) | packet_buff[3];
           if ( packet_block != last_block ) {
-            rv = write( trans->file, packet_buff+4, bytes -4);
+            int rv = write( trans->file, packet_buff+4, bytes -4);
+            trans->byte_count += bytes - 4;
             last_block++;
 
+            TFTP_SendAck(trans, last_block);
             if (( bytes < TFTP_BUF_SIZE) || ( rv < 0 )) {
               // sub size packet, end of file.
-              diff = time(NULL) - start_time;
-              if ( diff == 0 )
-                diff = 1;
-              syslog(LOG_ERR,"WRQ: Transfer from %s complete, %d bytes in %d seconds", trans->client_name, (last_block*512)+(bytes-2), diff);
-              TFTP_SendAck(trans, last_block);
+              PrintTransactionTime(trans);
               break;
             }
-            TFTP_SendAck(trans, last_block);
             continue;
           }
         } else if ( opcode == TFTP_ERROR ) {
@@ -456,12 +453,14 @@ int main( int argc, char *argv[] )
         // The child handles that transfer, before exiting,
         // The parent process goes back to listening for the next connection.
         pid_t pid = fork();
-          if ( pid > 0 ) { // parent
-            continue;
-          } else if ( pid < 0 ) {
-            syslog(LOG_ERR,"Fork error");
-            return -1;
-          }
+        if ( pid > 0 ) { // parent
+          continue;
+        } else if ( pid < 0 ) {
+          syslog(LOG_ERR,"Fork error");
+          return -1;
+        }
+
+        memset(&trans, 0, sizeof(struct Transaction));
 
         // Here we begin decoing the received packet and setting up the client
         if (Trans_SetupSocket(&trans, &their_addr) < 0 ) {
@@ -477,12 +476,13 @@ int main( int argc, char *argv[] )
 
         syslog(LOG_NOTICE,"%s: \"%s\"", trans.client_name, packet_buff+2);
         trans.errors = 5;  // max number of re-transmissions per transaction.
+        trans.start_time = time(NULL);
 
         // here we choose what function to run based on the opcode of the recieved packet.
         int opcode = packet_buff[1];
         if ( opcode == TFTP_RRQ ) {
           rv = TFTP_NewReadRequest(&trans, packet_buff);
-        } else if ( opcode == TFTP_WRQ ){
+        } else if ( opcode == TFTP_WRQ ) {
           rv = TFTP_NewWriteRequest(&trans, packet_buff);
         } else {
           syslog(LOG_NOTICE,"%s: Bad opecode: %d ", trans.client_name, opcode);
