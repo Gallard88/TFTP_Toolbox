@@ -63,6 +63,8 @@ struct Transaction
 
   int errors;
 
+  int file;
+
 
 };
 
@@ -194,14 +196,6 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
   int opcode, packet_block = 0, last_block = 1;
   int packet_length = 0, rv, diff;
 
-  int fp = OpenFile((const char *) data+2, 0);
-  if ( fp < 0 ) {
-    TFTP_Send_Error(trans, 1);
-    return -1;
-  } else {
-    syslog(LOG_NOTICE,"RRQ: %s, %s", trans->client_name, data+2);
-  }
-
   start_time = time(NULL);
 
   do {
@@ -211,7 +205,7 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
       send_buff[1] = TFTP_DATA;
       send_buff[2] = (last_block / 256);
       send_buff[3] = (last_block % 256);
-      packet_length = read(fp, send_buff+4, TFTP_DATA_SIZE);
+      packet_length = read(trans->file, send_buff+4, TFTP_DATA_SIZE);
       if ( packet_length < 0 ) {
         syslog(LOG_ERR,"RRQ: Read error: %d", packet_length );
         break;
@@ -261,8 +255,6 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
       break;
     }
   } while ( 1 );
-  close(fp);
-  close(trans->socket);
   return 0;
 }
 
@@ -287,14 +279,6 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
   int opcode, packet_block, last_block = 0;
   char packet_buff[TFTP_BUF_SIZE];
   int bytes, rv, diff;
-
-  int fp = OpenFile((const char *) data+2, 1);
-  if ( fp < 0 ) {
-    TFTP_Send_Error(trans, 3);
-    return -1;
-  } else {
-    syslog(LOG_NOTICE,"WRQ: %s, %s", trans->client_name, data+2);
-  }
 
   start_time = time(NULL);
   TFTP_SendAck(trans, last_block);
@@ -321,7 +305,7 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
         if ( opcode == TFTP_DATA ) {
           packet_block = (packet_buff[2] * 256) | packet_buff[3];
           if ( packet_block != last_block ) {
-            rv = write( fp, packet_buff+4, bytes -4);
+            rv = write( trans->file, packet_buff+4, bytes -4);
             last_block++;
 
             if (( bytes < TFTP_BUF_SIZE) || ( rv < 0 )) {
@@ -350,8 +334,6 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
     }
     TFTP_SendAck(trans, last_block);
   }
-  close(fp);
-  close(trans->socket);
   return 0;
 }
 
@@ -391,8 +373,8 @@ int main( int argc, char *argv[] )
 
   // ------------------------------------
   // Set up Syslog.
-  openlog("TFTP_Server", LOG_PID, LOG_USER);
-  syslog(LOG_NOTICE,"TFTP_Server online");
+  openlog("TFTP Server", LOG_PID, LOG_USER);
+  syslog(LOG_NOTICE,"TFTP Server online");
 
   // ------------------------------------
   // Daemonise the program.
@@ -492,12 +474,24 @@ int main( int argc, char *argv[] )
         }
         trans.errors = 5;  // max number of re-transmissions per transaction.
 
+        // open the file...
+        trans.file = OpenFile((const char *) packet_buff+2, 1);
+        if ( trans.file < 0 ) {
+          TFTP_Send_Error(&trans, 1);
+          return -1;
+        } else {
+          syslog(LOG_NOTICE,"%s: \"%s\"", trans.client_name, packet_buff+2);
+        }
+
         // fork a child,
         // the child then handles the transaction.
         if ( funcPtr != NULL ) {
           pid_t pid = fork();
           if ( pid == 0 ) { // child
-            return funcPtr(&trans, packet_buff);
+            rv = funcPtr(&trans, packet_buff);
+            close(trans.file);
+            close(trans.socket);
+            return rv;
 
           } else if ( pid < 0 ) {
             syslog(LOG_ERR,"Fork error");
