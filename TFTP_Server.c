@@ -61,6 +61,8 @@ struct Transaction
   struct sockaddr_storage *address;
   char client_name[256];
 
+  int errors;
+
 
 };
 
@@ -87,6 +89,17 @@ int Trans_SetupSocket(struct Transaction *t, struct sockaddr_storage *address)
   return 0;
 }
 
+// *******************************************************************************************
+static int RunErrorHandler(struct Transaction *t)
+{
+    if ( t->errors ) {
+      t->errors--;
+      return 0;
+    } else {
+      syslog(LOG_ERR,"Too many errors, closing connection");
+      return -1;
+    }
+}
 // *******************************************************************************************
 void clean_up_child_process (int signal_number)
 {
@@ -176,13 +189,10 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
 {
   fd_set readFD;
   struct timeval timeout;
-  struct sockaddr_storage their_addr;
-  socklen_t addr_len;
   time_t start_time;
   char rec_buff[TFTP_ACK_SIZE], send_buff[TFTP_BUF_SIZE];
   int opcode, packet_block = 0, last_block = 1;
   int packet_length = 0, rv, diff;
-  int errors = 5;	// allow no more than 5 errors per trasnfer.
 
   int fp = OpenFile((const char *) data+2, 0);
   if ( fp < 0 ) {
@@ -225,7 +235,9 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
     if ( select(trans->socket+1, &readFD, NULL, NULL, &timeout) > 0 ) {
 
       if ( FD_ISSET(trans->socket, &readFD) ) {
-        addr_len = sizeof(struct sockaddr);
+
+        socklen_t addr_len = sizeof(struct sockaddr);
+        struct sockaddr_storage their_addr;
         rv = recvfrom(trans->socket, rec_buff, TFTP_ACK_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
 
         opcode = rec_buff[1];
@@ -245,10 +257,7 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
         }
       }
     }
-    if ( errors ) {
-      errors--;
-    } else {
-      syslog(LOG_ERR,"RRQ: Too many errors, closing connection");
+    if ( RunErrorHandler(trans) < 0 ) {
       break;
     }
   } while ( 1 );
@@ -274,13 +283,10 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
 {
   fd_set readFD;
   struct timeval timeout;
-  struct sockaddr_storage their_addr;
-  socklen_t addr_len;
   time_t start_time;
   int opcode, packet_block, last_block = 0;
   char packet_buff[TFTP_BUF_SIZE];
   int bytes, rv, diff;
-  int errors = 5;	// allow no more than 5 errors per trasnfer.
 
   int fp = OpenFile((const char *) data+2, 1);
   if ( fp < 0 ) {
@@ -303,8 +309,10 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
       if ( FD_ISSET(trans->socket, &readFD) ) {
 
         // read out packet.
-        addr_len = sizeof(struct sockaddr);
+        socklen_t addr_len = sizeof(struct sockaddr);
+        struct sockaddr_storage their_addr;
         bytes = recvfrom(trans->socket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
+
         if ( bytes <= 0 ) {
           syslog(LOG_ERR,"WRQ: recvfrom: %d", bytes);
           break;
@@ -337,10 +345,7 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
         TFTP_SendAck(trans, last_block);
       }
     }
-    if ( errors ) {
-      errors--;
-    } else {
-      syslog(LOG_ERR,"WRQ: Too many errors, closing connection");
+    if ( RunErrorHandler(trans) < 0 ) {
       break;
     }
     TFTP_SendAck(trans, last_block);
@@ -485,6 +490,7 @@ int main( int argc, char *argv[] )
         if (Trans_SetupSocket(&trans, &their_addr) < 0 ) {
           continue;
         }
+        trans.errors = 5;  // max number of re-transmissions per transaction.
 
         // fork a child,
         // the child then handles the transaction.
