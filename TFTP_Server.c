@@ -454,50 +454,45 @@ int main( int argc, char *argv[] )
 
         int opcode = packet_buff[1];
 
-        // if we have a valid request, we fork ourselves.
-        // The child then handles that transfer, before exiting,
+        // The child handles that transfer, before exiting,
         // The parent process goes back to listening for the next connection.
-        TFTP_Handle funcPtr;
-
-        // here we choose what function to run based on the opcode of the recieved packet.
-        if ( opcode == TFTP_RRQ ) {
-          funcPtr = &TFTP_NewReadRequest;
-        } else if ( opcode == TFTP_WRQ ){
-          funcPtr = &TFTP_NewWriteRequest;
-        } else {
-          funcPtr = NULL;
-        }
-
-        // Here we begin decoing the received packet and setting up the client
-        if (Trans_SetupSocket(&trans, &their_addr) < 0 ) {
-          continue;
-        }
-        trans.errors = 5;  // max number of re-transmissions per transaction.
-
-        // open the file...
-        trans.file = OpenFile((const char *) packet_buff+2, 1);
-        if ( trans.file < 0 ) {
-          TFTP_Send_Error(&trans, 1);
-          return -1;
-        } else {
-          syslog(LOG_NOTICE,"%s: \"%s\"", trans.client_name, packet_buff+2);
-        }
-
-        // fork a child,
-        // the child then handles the transaction.
-        if ( funcPtr != NULL ) {
-          pid_t pid = fork();
-          if ( pid == 0 ) { // child
-            rv = funcPtr(&trans, packet_buff);
-            close(trans.file);
-            close(trans.socket);
+        pid_t pid = fork();
+          if ( pid > 0 ) { // parent
+            continue;
             return rv;
 
           } else if ( pid < 0 ) {
             syslog(LOG_ERR,"Fork error");
             return -1;
           }
+
+        // Here we begin decoing the received packet and setting up the client
+        if (Trans_SetupSocket(&trans, &their_addr) < 0 ) {
+          continue;
         }
+
+        // open the file...
+        trans.file = OpenFile((const char *) packet_buff+2, 1);
+        if ( trans.file < 0 ) {
+          TFTP_Send_Error(&trans, 1);
+          return -1;
+        }
+
+        syslog(LOG_NOTICE,"%s: \"%s\"", trans.client_name, packet_buff+2);
+        trans.errors = 5;  // max number of re-transmissions per transaction.
+
+        // here we choose what function to run based on the opcode of the recieved packet.
+        if ( opcode == TFTP_RRQ ) {
+          rv = TFTP_NewReadRequest(&trans, packet_buff);
+        } else if ( opcode == TFTP_WRQ ){
+          rv = TFTP_NewWriteRequest(&trans, packet_buff);
+        } else {
+          syslog(LOG_NOTICE,"%s: Bad opecode: %d ", trans.client_name, opcode);
+          rv = -1;
+        }
+        close(trans.file);
+        close(trans.socket);
+        return rv;
       }
     }
   }
