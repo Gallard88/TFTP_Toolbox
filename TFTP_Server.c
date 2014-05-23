@@ -39,6 +39,7 @@
 #include <time.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdint.h>
 
 // *******************************************************************************************
 
@@ -96,6 +97,7 @@ static int RunErrorHandler(struct Transaction *t)
 {
     if ( t->errors ) {
       t->errors--;
+      syslog(LOG_ERR,"Errors encountered");
       return 0;
     } else {
       syslog(LOG_ERR,"Too many errors, closing connection");
@@ -193,7 +195,7 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
   struct timeval timeout;
   time_t start_time;
   char rec_buff[TFTP_ACK_SIZE], send_buff[TFTP_BUF_SIZE];
-  int opcode, packet_block = 0, last_block = 1;
+  uint16_t packet_block = 0, last_block = 1;
   int packet_length = 0, rv, diff;
 
   start_time = time(NULL);
@@ -234,7 +236,7 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
         struct sockaddr_storage their_addr;
         rv = recvfrom(trans->socket, rec_buff, TFTP_ACK_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
 
-        opcode = rec_buff[1];
+        int opcode = rec_buff[1];
         if ( opcode == TFTP_ACK ) {
           packet_block = (rec_buff[2] * 256) | rec_buff[3];
           if ( packet_length < TFTP_BUF_SIZE ) {
@@ -276,7 +278,7 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
   fd_set readFD;
   struct timeval timeout;
   time_t start_time;
-  int opcode, packet_block, last_block = 0;
+  uint16_t packet_block, last_block = 0;
   char packet_buff[TFTP_BUF_SIZE];
   int bytes, rv, diff;
 
@@ -301,7 +303,7 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
           syslog(LOG_ERR,"WRQ: recvfrom: %d", bytes);
           break;
         }
-        opcode = packet_buff[1];
+        int opcode = packet_buff[1];
         if ( opcode == TFTP_DATA ) {
           packet_block = (packet_buff[2] * 256) | packet_buff[3];
           if ( packet_block != last_block ) {
@@ -451,16 +453,11 @@ int main( int argc, char *argv[] )
         } else if ( bytes == 0 ) {
           continue;
         }
-
-        int opcode = packet_buff[1];
-
         // The child handles that transfer, before exiting,
         // The parent process goes back to listening for the next connection.
         pid_t pid = fork();
           if ( pid > 0 ) { // parent
             continue;
-            return rv;
-
           } else if ( pid < 0 ) {
             syslog(LOG_ERR,"Fork error");
             return -1;
@@ -482,6 +479,7 @@ int main( int argc, char *argv[] )
         trans.errors = 5;  // max number of re-transmissions per transaction.
 
         // here we choose what function to run based on the opcode of the recieved packet.
+        int opcode = packet_buff[1];
         if ( opcode == TFTP_RRQ ) {
           rv = TFTP_NewReadRequest(&trans, packet_buff);
         } else if ( opcode == TFTP_WRQ ){
