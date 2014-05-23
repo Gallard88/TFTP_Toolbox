@@ -99,6 +99,15 @@ static void PrintTransactionTime(struct Transaction *t)
   if ( diff == 0 )
     diff = 1;
   syslog(LOG_ERR,"%s: Transfer complete, %d bytes in %d seconds", t->client_name, t->byte_count, diff);
+  int rate = t->byte_count / diff;
+
+  if ( rate > 1000000 ) {
+    syslog(LOG_ERR,"%d MB/s", rate);
+  } else if ( rate > 1000 ) {
+    syslog(LOG_ERR,"%d kB/s", rate);
+  } else {
+    syslog(LOG_ERR,"%d B/s", rate);
+  }
 }
 
 // *******************************************************************************************
@@ -215,7 +224,7 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
       send_buff[3] = (last_block % 256);
       packet_length = read(trans->file, send_buff+4, TFTP_DATA_SIZE);
       if ( packet_length < 0 ) {
-        syslog(LOG_ERR,"RRQ: Read error: %d", packet_length );
+        syslog(LOG_ERR,"%s: Read error: %d", trans->client_name, packet_length );
         break;
       }
       trans->byte_count += packet_length;
@@ -225,7 +234,7 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
 
     int rv = sendto(trans->socket, send_buff, packet_length, 0, (const struct sockaddr *) trans->address, sizeof(struct sockaddr));
     if ( rv < 0 ) {
-      syslog(LOG_ERR,"RRQ: sendto: %d", rv );
+      syslog(LOG_ERR,"%s: sendto: %d", trans->client_name, rv );
       break;
     }
 
@@ -252,7 +261,7 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
           }
           continue;
         } else if ( opcode == TFTP_ERROR ) {
-          syslog(LOG_ERR,"RRQ: Error %d: %s", rec_buff[3], rec_buff+4);
+          syslog(LOG_ERR,"%s: Error %d: %s", trans->client_name, rec_buff[3], rec_buff+4);
           break;
         }
       }
@@ -290,6 +299,7 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
     FD_SET(trans->socket, &readFD);
     timeout.tv_sec = ACT_TIMEOUT;
     timeout.tv_usec = 0;
+
     // listen on socket, but with a time out so we can detect problems.
     if ( select(trans->socket+1, &readFD, NULL, NULL, &timeout) > 0 ) {
       if ( FD_ISSET(trans->socket, &readFD) ) {
@@ -300,7 +310,7 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
         int bytes = recvfrom(trans->socket, packet_buff, TFTP_BUF_SIZE, 0,(struct sockaddr *)&their_addr, &addr_len);
 
         if ( bytes <= 0 ) {
-          syslog(LOG_ERR,"WRQ: recvfrom: %d", bytes);
+          syslog(LOG_ERR,"%s: recvfrom: %d", trans->client_name, bytes);
           break;
         }
         int opcode = packet_buff[1];
@@ -315,21 +325,21 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
             if (( bytes < TFTP_BUF_SIZE) || ( rv < 0 )) {
               // sub size packet, end of file.
               PrintTransactionTime(trans);
-              break;
+              return -1;
             }
             continue;
           }
         } else if ( opcode == TFTP_ERROR ) {
-          syslog(LOG_ERR,"WRQ: Error %d: %s", packet_buff[3], packet_buff+4);
-          break;
+          syslog(LOG_ERR,"%s: Error %d: %s", trans->client_name, packet_buff[3], packet_buff+4);
+          return -1;
         }
       } else {
-        syslog(LOG_ERR,"WRQ: Timeout: Block %d", last_block);
+        syslog(LOG_ERR,"%s: Timeout: Block %d", trans->client_name, last_block);
         TFTP_SendAck(trans, last_block);
       }
     }
     if ( RunErrorHandler(trans) < 0 ) {
-      break;
+      return -1;
     }
     TFTP_SendAck(trans, last_block);
   }
