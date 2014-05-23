@@ -73,38 +73,28 @@ void clean_up_child_process (int signal_number)
 }
 
 // *******************************************************************************************
-static void Correct_Path(char *path)
-{
-  // if it sees a windows style path name, correct it and turn it into a unix style.
-  while ( *path != 0 ) {
-    if ( *path == '\\') {
-      *path = '/';
-    }
-    path++;
-  }
-}
-
-// *******************************************************************************************
-static int VerifyFilename(const char *name)
-{
-  if ( strstr(name, "..") != NULL ) {
-    return -1;
-  }
-  return 0;
-}
-
-// *******************************************************************************************
 static int OpenFile(const char *name, int write)
 {
-  char *filename;
+  char *filename, *path;
   int fp;
+
+  if ( strstr(name, "..") != NULL ) {
+    syslog(LOG_NOTICE, ".. Violation");
+    return -1;
+  }
 
   int rv = asprintf(&filename, "%s%s", SystemDir, name);
   if (( rv < 0 ) || ( filename == NULL )) {
     syslog(LOG_NOTICE, "Filename == NULL");
     return -1;
   } else {
-    Correct_Path(filename);
+    path = filename;
+    while ( *path != 0 ) {
+      if ( *path == '\\') {
+        *path = '/';
+      }
+      path++;
+    }
   }
 
   if ( write != 0 ) {
@@ -201,12 +191,6 @@ int TFTP_NewReadRequest(char *data, struct sockaddr_storage *address)
   }
 
   inet_ntop(address->ss_family,get_in_addr((struct sockaddr *)address),client_name, sizeof (client_name));
-
-  if ( VerifyFilename((const char *)data+2) < 0 ) {
-    syslog(LOG_ERR,"RRQ: %s, invalid filename %s", client_name, data+2);
-    TFTP_Send_Error(rrq_socket, 2, address);
-    return -1;
-  }
 
   int fp = OpenFile((const char *) data+2, 0);
   if ( fp < 0 ) {
@@ -316,11 +300,6 @@ int TFTP_NewWriteRequest(char *data, struct sockaddr_storage *address)
     return -1;
   }
   inet_ntop(address->ss_family,get_in_addr((struct sockaddr *)address),client_name, sizeof (client_name));
-
-  if ( VerifyFilename((const char *)data+2) < 0 ) {
-    syslog(LOG_ERR,"WRQ: %s, invalid filename %s", client_name, data+2);
-    TFTP_Send_Error(wrq_socket, 2, address);
-  }
 
   int fp = OpenFile((const char *) data+2, 1);
   if ( fp < 0 ) {
