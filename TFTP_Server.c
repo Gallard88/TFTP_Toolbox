@@ -258,7 +258,7 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
 }
 
 // *******************************************************************************************
-void TFTP_SendAck(int block_number, int sock, struct sockaddr_storage *address)
+void TFTP_SendAck(struct Transaction *t, int block_number)
 {
   char buf[4];
 
@@ -266,7 +266,7 @@ void TFTP_SendAck(int block_number, int sock, struct sockaddr_storage *address)
   buf[1] = 4;
   buf[2] = (block_number / 256);
   buf[3] = (block_number % 256);
-  sendto(sock, buf, 4, 0, (const struct sockaddr *) address, sizeof(struct sockaddr));
+  sendto(t->socket, buf, 4, 0, (const struct sockaddr *) t->address, sizeof(struct sockaddr));
 }
 
 // *******************************************************************************************
@@ -291,7 +291,7 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
   }
 
   start_time = time(NULL);
-  TFTP_SendAck(last_block, trans->socket, trans->address);
+  TFTP_SendAck(trans, last_block);
 
   while ( 1 ) {
     FD_ZERO(&readFD);
@@ -322,10 +322,10 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
               if ( diff == 0 )
                 diff = 1;
               syslog(LOG_ERR,"WRQ: Transfer from %s complete, %d bytes in %d seconds", trans->client_name, (last_block*512)+(bytes-2), diff);
-              TFTP_SendAck(last_block, trans->socket, trans->address);
+              TFTP_SendAck(trans, last_block);
               break;
             }
-            TFTP_SendAck(last_block, trans->socket, trans->address);
+            TFTP_SendAck(trans, last_block);
             continue;
           }
         } else if ( opcode == TFTP_ERROR ) {
@@ -334,7 +334,7 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
         }
       } else {
         syslog(LOG_ERR,"WRQ: Timeout: Block %d", last_block);
-        TFTP_SendAck(last_block, trans->socket, trans->address);
+        TFTP_SendAck(trans, last_block);
       }
     }
     if ( errors ) {
@@ -343,7 +343,7 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
       syslog(LOG_ERR,"WRQ: Too many errors, closing connection");
       break;
     }
-    TFTP_SendAck(last_block, trans->socket, trans->address);
+    TFTP_SendAck(trans, last_block);
   }
   close(fp);
   close(trans->socket);
