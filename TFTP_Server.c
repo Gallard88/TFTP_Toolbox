@@ -146,7 +146,20 @@ static void *get_in_addr(struct sockaddr *sa)
 }
 
 // *******************************************************************************************
-void TFTP_Send_Error(int sock, int error_type, struct sockaddr_storage *address)
+const char *ErrorMsg[] =
+{
+  "Not defined",
+  "File not found",
+  "Access violation",
+  "Disk full or allocation exceeded",
+  "Illegal TFTP operation",
+  "Unknown transfer ID",
+  "File already exists"
+  "No such user"
+};
+
+// *******************************************************************************************
+void TFTP_Send_Error(struct Transaction *t, int error_type)
 {
   char buf[TFTP_BUF_SIZE];
 
@@ -154,44 +167,8 @@ void TFTP_Send_Error(int sock, int error_type, struct sockaddr_storage *address)
   buf[1] = TFTP_DATA;
   buf[2] = 0;
   buf[3] = error_type;
-  switch ( error_type ) {
-  case 0 :
-    strncpy(buf+4, "Not defined", TFTP_BUF_SIZE-4);
-    break;
-
-  case 1:
-    strncpy(buf+4, "File not found", TFTP_BUF_SIZE-4);
-    break;
-
-  case 2:
-    strncpy(buf+4, "Access violation", TFTP_BUF_SIZE-4);
-    break;
-
-  case 3:
-    strncpy(buf+4, "Disk full or allocation exceeded", TFTP_BUF_SIZE-4);
-    break;
-
-  case 4:
-    strncpy(buf+4, "Illegal TFTP operation", TFTP_BUF_SIZE-4);
-    break;
-
-  case 5:
-    strncpy(buf+4, "Unknown transfer ID", TFTP_BUF_SIZE-4);
-    break;
-
-  case 6:
-    strncpy(buf+4, "File already exists", TFTP_BUF_SIZE-4);
-    break;
-
-  case 7:
-    strncpy(buf+4, "No such user", TFTP_BUF_SIZE-4);
-    break;
-
-  default:
-    return;
-
-  }
-  sendto(sock, buf, strlen(buf+4)+5, 0, (const struct sockaddr *) address, sizeof(struct sockaddr));
+  strcpy(buf+4, ErrorMsg[error_type]);
+  sendto(t->socket, buf, strlen(buf+4)+5, 0, (const struct sockaddr *) t->address, sizeof(struct sockaddr));
 }
 
 // *******************************************************************************************
@@ -209,7 +186,7 @@ int TFTP_NewReadRequest(struct Transaction *trans, char *data)
 
   int fp = OpenFile((const char *) data+2, 0);
   if ( fp < 0 ) {
-    TFTP_Send_Error(trans->socket, 1, trans->address);
+    TFTP_Send_Error(trans, 1);
     return -1;
   } else {
     syslog(LOG_NOTICE,"RRQ: %s, %s", trans->client_name, data+2);
@@ -307,7 +284,7 @@ int TFTP_NewWriteRequest(struct Transaction *trans, char *data)
 
   int fp = OpenFile((const char *) data+2, 1);
   if ( fp < 0 ) {
-    TFTP_Send_Error(trans->socket, 3, trans->address);
+    TFTP_Send_Error(trans, 3);
     return -1;
   } else {
     syslog(LOG_NOTICE,"WRQ: %s, %s", trans->client_name, data+2);
